@@ -1,5 +1,8 @@
 /*
  *	Color class
+ *      Author: Jihong Min
+ *      Email: jmin39@wisc.edu
+ *      CS Login: jmin@cs.wisc.edu
  */
 public class Color{
 	private String color;

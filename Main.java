@@ -1,5 +1,8 @@
 /*
  * Test the use of the Color method
+ * Author: JihongMIn
+ * Email: jmin39@wisc.edu
+ * CS Login: jmin@cs.wisc.edu
  */
 import java.util.*;
 
