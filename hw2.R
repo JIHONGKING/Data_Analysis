@@ -39,11 +39,11 @@ ui <- fluidPage(
   # Tabs for different maps
   div(style = "margin-top: 20px; margin-bottom: 30px;",  # Add space above/below
       tabsetPanel(
-  tabsetPanel(
-    tabPanel("Store Location Map", leafletOutput("map", height = "600px")),
-    tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "600px"))
-    )
+        tabPanel("Store Location Map", leafletOutput("map", height = "600px")),  # Remove duplicate map
+        tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "600px"))
+      )
   ),
+
   
   # Store table output
   fluidRow(
