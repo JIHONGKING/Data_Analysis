@@ -13,7 +13,7 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 
 # Load Starbucks data
-starbucks_data <- read_csv("~/Desktop/Classes/stat436_s25/data/startbucks.csv")
+starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/main/startbucks.csv")
 
 # Data Preprocessing
 starbucks_data <- starbucks_data %>%
