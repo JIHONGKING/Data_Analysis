@@ -37,21 +37,19 @@ ui <- fluidPage(
   ),
   
   # Tabs for different maps
-  div(style = "margin-top: 20px; margin-bottom: 30px;",  # Add space above/below
+  div(style = "margin-top: 20px; margin-bottom: 30px;",
       tabsetPanel(
-        tabPanel("Store Location Map", leafletOutput("map", height = "600px")),  # Remove duplicate map
+        tabPanel("Store Location Map", leafletOutput("map", height = "600px")),
         tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "600px"))
       )
   ),
 
-  
   # Store table output
   fluidRow(
     column(12, tableOutput("store_table"))
   )
 )
 
-# Server Component
 # Server Component
 server <- function(input, output, session) {
   
@@ -87,8 +85,11 @@ server <- function(input, output, session) {
     # Filter based on map bounds
     data <- data %>%
       filter(latitude >= bounds$minLat & latitude <= bounds$maxLat,
-             longitude >= bounds$minLon & longitude <= bounds$maxLon)
+             longitude >= bounds$minLon & longitude <= bounds$maxLon) %>%
+      mutate(full_address = ifelse(is.na(streetAddressLine2), streetAddressLine1, 
+                                   paste(streetAddressLine1, streetAddressLine2, sep=", ")))
     
+    req(data)  # Ensure data is not empty
     return(data)
   })
   
@@ -105,6 +106,7 @@ server <- function(input, output, session) {
   # Update Store Location Map
   observe({
     data <- filtered_data()
+    req(nrow(data) > 0)  # Ensure there are data points to display
     
     leafletProxy("map", data = data) %>%
       clearMarkers() %>%
@@ -117,7 +119,7 @@ server <- function(input, output, session) {
     # Compute Starbucks store count by country
     country_summary <- starbucks_data %>%
       group_by(countryCode) %>%
-      summarise(store_count = n())
+      summarise(store_count = n(), .groups = "drop")
     
     # Load world map
     world <- ne_countries(scale = "medium", returnclass = "sf")
@@ -148,7 +150,9 @@ server <- function(input, output, session) {
   
   # Render Table
   output$store_table <- renderTable({
-    filtered_data() %>% select(storeNumber, full_address, ownershipTypeCode)
+    data <- filtered_data()
+    req(nrow(data) > 0)  # Ensure table is not empty
+    data %>% select(storeNumber, full_address, ownershipTypeCode)
   })
 }
 
