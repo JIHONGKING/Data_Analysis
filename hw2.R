@@ -13,7 +13,13 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 
 # Load Starbucks data
-starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/main/startbucks.csv")
+starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/main/startbucks.csv",
+                           show_col_types = FALSE)  # 데이터 타입 오류 방지
+
+# Debug: Check if data is loaded correctly
+print(head(starbucks_data))  # 첫 6개 행 출력
+print(range(starbucks_data$latitude, na.rm = TRUE))  # 위도 범위 확인
+print(range(starbucks_data$longitude, na.rm = TRUE)) # 경도 범위 확인
 
 # Data Preprocessing
 starbucks_data <- starbucks_data %>%
@@ -37,7 +43,7 @@ ui <- fluidPage(
   ),
   
   # Tabs for different maps with fixed height range
-  div(style = "margin-top: 10px; margin-bottom: 20px;",  # Adjusted spacing
+  div(style = "margin-top: 10px; margin-bottom: 20px;",  
       tabsetPanel(
         tabPanel("Store Location Map", 
                  div(style = "min-height: 500px; max-height: 800px; width: 100%;",
@@ -104,10 +110,11 @@ server <- function(input, output, session) {
                 lat2 = max(starbucks_data$latitude, na.rm = TRUE))
   })
   
-  # Update Store Location Map
+  # Debug: Check if data is passing into the map
   observe({
     data <- filtered_data()
-    
+    print(paste("Filtered data points:", nrow(data)))  # Check number of stores being displayed
+
     leafletProxy("map", data = data) %>%
       clearMarkers() %>%
       addCircleMarkers(~longitude, ~latitude, popup = ~paste("Address:", full_address),
@@ -151,7 +158,7 @@ server <- function(input, output, session) {
   # Render Table
   output$store_table <- renderTable({
     data <- filtered_data()
-    req(nrow(data) > 0)  # Ensure table is not empty
+    req(nrow(data) > 0)  
     data %>% select(storeNumber, full_address, ownershipTypeCode)
   })
 }
