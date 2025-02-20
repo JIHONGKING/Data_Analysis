@@ -24,6 +24,7 @@ starbucks_data <- starbucks_data %>%
 
 # UI Component
 ui <- fluidPage(
+  style = "overflow-x: hidden; overflow-y: hidden;",  # Remove scrolling issues
   titlePanel("Starbucks Global Store Analysis"),
   
   # Arrange filters horizontally
@@ -37,10 +38,14 @@ ui <- fluidPage(
   ),
   
   # Tabs for different maps
-  div(style = "margin-top: 20px; margin-bottom: 30px;",
+  div(style = "height: 100vh; width: 100%; max-height: 1000px;",  # Full screen map handling
       tabsetPanel(
-        tabPanel("Store Location Map", leafletOutput("map", height = "1000px")),
-        tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "1000px"))
+        tabPanel("Store Location Map", 
+                 div(style = "height: 90vh; width: 100%;",  # Make sure map fills the viewport
+                     leafletOutput("map", height = "100%"))),
+        tabPanel("Choropleth Map", 
+                 div(style = "height: 90vh; width: 100%;",
+                     leafletOutput("choropleth_map", height = "100%")))
       )
   ),
 
@@ -100,7 +105,8 @@ server <- function(input, output, session) {
       fitBounds(lng1 = min(starbucks_data$longitude, na.rm = TRUE),
                 lat1 = min(starbucks_data$latitude, na.rm = TRUE),
                 lng2 = max(starbucks_data$longitude, na.rm = TRUE),
-                lat2 = max(starbucks_data$latitude, na.rm = TRUE))
+                lat2 = max(starbucks_data$latitude, na.rm = TRUE)) %>%
+      setView(lng = 0, lat = 20, zoom = 2)  # Adjust zoom level
   })
   
   # Update Store Location Map
