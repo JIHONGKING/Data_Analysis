@@ -36,14 +36,14 @@ ui <- fluidPage(
                           selected = "ALL"))
   ),
   
-  # Tabs for different maps
+  # Tabs for different maps with fixed height range
   div(style = "margin-top: 10px; margin-bottom: 20px;",  # Adjusted spacing
       tabsetPanel(
         tabPanel("Store Location Map", 
-                 div(style = "height: auto; width: 100%;",  # Set fixed height
+                 div(style = "min-height: 500px; max-height: 800px; width: 100%;",
                      leafletOutput("map", height = "100%"))),
         tabPanel("Choropleth Map", 
-                 div(style = "height: auto; width: 100%;",
+                 div(style = "min-height: 500px; max-height: 800px; width: 100%;",
                      leafletOutput("choropleth_map", height = "100%")))
       )
   ),
@@ -89,11 +89,8 @@ server <- function(input, output, session) {
     # Filter based on map bounds
     data <- data %>%
       filter(latitude >= bounds$minLat & latitude <= bounds$maxLat,
-             longitude >= bounds$minLon & longitude <= bounds$maxLon) %>%
-      mutate(full_address = ifelse(is.na(streetAddressLine2), streetAddressLine1, 
-                                   paste(streetAddressLine1, streetAddressLine2, sep=", ")))
+             longitude >= bounds$minLon & longitude <= bounds$maxLon)
     
-    req(data)  # Ensure data is not empty
     return(data)
   })
   
@@ -104,14 +101,12 @@ server <- function(input, output, session) {
       fitBounds(lng1 = min(starbucks_data$longitude, na.rm = TRUE),
                 lat1 = min(starbucks_data$latitude, na.rm = TRUE),
                 lng2 = max(starbucks_data$longitude, na.rm = TRUE),
-                lat2 = max(starbucks_data$latitude, na.rm = TRUE)) %>%
-      setView(lng = 0, lat = 20, zoom = 2)  # Adjust zoom level
+                lat2 = max(starbucks_data$latitude, na.rm = TRUE))
   })
   
   # Update Store Location Map
   observe({
     data <- filtered_data()
-    req(nrow(data) > 0)  # Ensure there are data points to display
     
     leafletProxy("map", data = data) %>%
       clearMarkers() %>%
@@ -124,7 +119,7 @@ server <- function(input, output, session) {
     # Compute Starbucks store count by country
     country_summary <- starbucks_data %>%
       group_by(countryCode) %>%
-      summarise(store_count = n(), .groups = "drop")
+      summarise(store_count = n())
     
     # Load world map
     world <- ne_countries(scale = "medium", returnclass = "sf")
