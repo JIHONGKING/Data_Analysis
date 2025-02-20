@@ -52,6 +52,7 @@ ui <- fluidPage(
 )
 
 # Server Component
+# Server Component
 server <- function(input, output, session) {
   
   # Reactive values to store map bounds
