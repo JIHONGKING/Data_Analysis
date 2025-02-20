@@ -24,7 +24,6 @@ starbucks_data <- starbucks_data %>%
 
 # UI Component
 ui <- fluidPage(
-  style = "overflow-x: hidden; overflow-y: hidden;",  # Remove scrolling issues
   titlePanel("Starbucks Global Store Analysis"),
   
   # Arrange filters horizontally
@@ -38,13 +37,13 @@ ui <- fluidPage(
   ),
   
   # Tabs for different maps
-  div(style = "height: 100vh; width: 100%; max-height: 1000px;",  # Full screen map handling
+  div(style = "margin-top: 10px; margin-bottom: 20px;",  # Adjusted spacing
       tabsetPanel(
         tabPanel("Store Location Map", 
-                 div(style = "height: 90vh; width: 100%;",  # Make sure map fills the viewport
+                 div(style = "height: 700px; width: 100%;",  # Set fixed height
                      leafletOutput("map", height = "100%"))),
         tabPanel("Choropleth Map", 
-                 div(style = "height: 90vh; width: 100%;",
+                 div(style = "height: 700px; width: 100%;",
                      leafletOutput("choropleth_map", height = "100%")))
       )
   ),
