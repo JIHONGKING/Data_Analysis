@@ -22,7 +22,7 @@ library(rnaturalearthdata)
 ## 
 ##     countries110
 # Load Data
-starbucks_data <- read_csv("~/Desktop/Classes /stat436_s25/data/startbucks.csv")
+starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/startbucks.csv")
 ## New names:
 ## • `` -> `...1`
 ## Rows: 28289 Columns: 17
