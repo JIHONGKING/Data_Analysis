@@ -40,10 +40,10 @@ ui <- fluidPage(
   div(style = "margin-top: 10px; margin-bottom: 20px;",  # Adjusted spacing
       tabsetPanel(
         tabPanel("Store Location Map", 
-                 div(style = "height: 700px; width: 100%;",  # Set fixed height
+                 div(style = "height: auto; width: 100%;",  # Set fixed height
                      leafletOutput("map", height = "100%"))),
         tabPanel("Choropleth Map", 
-                 div(style = "height: 700px; width: 100%;",
+                 div(style = "height: auto; width: 100%;",
                      leafletOutput("choropleth_map", height = "100%")))
       )
   ),
