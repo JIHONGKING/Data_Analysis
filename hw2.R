@@ -2,7 +2,7 @@
 # Author: Jihong Min
 # Date: 2025-02-20
 
-# Load required libraries
+# Load necessary packages
 library(shiny)
 library(leaflet)
 library(dplyr)
@@ -12,42 +12,26 @@ library(sf)
 library(rnaturalearth)
 library(rnaturalearthdata)
 
-# Load Starbucks data
-starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/startbucks.csv")
-
-# Data Preprocessing
-starbucks_data <- starbucks_data %>%
-  select(storeNumber, countryCode, ownershipTypeCode, latitude, longitude, streetAddressLine1, streetAddressLine2) %>%
-  mutate(full_address = ifelse(is.na(streetAddressLine2), streetAddressLine1, 
-                               paste(streetAddressLine1, streetAddressLine2, sep=", "))) %>%
-  na.omit()
-
 # UI Component
 ui <- fluidPage(
   titlePanel("Starbucks Global Store Analysis"),
   
-  # Arrange filters horizontally
+  # Filters
   fluidRow(
     column(4, selectInput("selected_country", "Select Country:",
-                          choices = c("ALL", unique(starbucks_data$countryCode)),  
+                          choices = c("ALL"),  
                           selected = "ALL")),
     column(4, selectInput("selected_ownership", "Select Ownership Type:",
                           choices = c("ALL", "Company Owned (CO)", "Licensed Store (LS)"),
                           selected = "ALL"))
   ),
   
-  # Tabs for different maps with fixed height range
-  div(style = "margin-top: 10px; margin-bottom: 20px;",  # Adjusted spacing
-      tabsetPanel(
-        tabPanel("Store Location Map", 
-                 div(style = "min-height: 500px; max-height: 800px; width: 100%;",
-                     leafletOutput("map", height = "100%"))),
-        tabPanel("Choropleth Map", 
-                 div(style = "min-height: 500px; max-height: 800px; width: 100%;",
-                     leafletOutput("choropleth_map", height = "100%")))
-      )
+  # Tabs for different maps
+  tabsetPanel(
+    tabPanel("Store Location Map", leafletOutput("map", height = "600px")),
+    tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "600px"))
   ),
-
+  
   # Store table output
   fluidRow(
     column(12, tableOutput("store_table"))
@@ -57,22 +41,24 @@ ui <- fluidPage(
 # Server Component
 server <- function(input, output, session) {
   
-  # Reactive values to store map bounds
-  bounds <- reactiveValues(minLat = -90, maxLat = 90, minLon = -180, maxLon = 180)
-  
-  # Update map bounds when user moves the map
+  # Load Starbucks data (Inside server to avoid global scope issues)
+  starbucks_data <- reactive({
+    read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/main/startbucks.csv") %>%
+      select(storeNumber, countryCode, ownershipTypeCode, latitude, longitude, streetAddressLine1, streetAddressLine2) %>%
+      mutate(full_address = ifelse(is.na(streetAddressLine2), streetAddressLine1, 
+                                   paste(streetAddressLine1, streetAddressLine2, sep=", "))) %>%
+      na.omit()
+  })
+
+  # Update country list dynamically after data is loaded
   observe({
-    if (!is.null(input$map_bounds)) {
-      bounds$minLat <- input$map_bounds$south
-      bounds$maxLat <- input$map_bounds$north
-      bounds$minLon <- input$map_bounds$west
-      bounds$maxLon <- input$map_bounds$east
-    }
+    updateSelectInput(session, "selected_country", 
+                      choices = c("ALL", unique(starbucks_data()$countryCode)))
   })
   
   # Reactive function to filter data
   filtered_data <- reactive({
-    data <- starbucks_data
+    data <- starbucks_data()
     
     # Filter by country
     if (input$selected_country != "ALL") {
@@ -86,11 +72,6 @@ server <- function(input, output, session) {
       data <- data %>% filter(ownershipTypeCode == "LS")
     }
     
-    # Filter based on map bounds
-    data <- data %>%
-      filter(latitude >= bounds$minLat & latitude <= bounds$maxLat,
-             longitude >= bounds$minLon & longitude <= bounds$maxLon)
-    
     return(data)
   })
   
@@ -98,10 +79,10 @@ server <- function(input, output, session) {
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
-      fitBounds(lng1 = min(starbucks_data$longitude, na.rm = TRUE),
-                lat1 = min(starbucks_data$latitude, na.rm = TRUE),
-                lng2 = max(starbucks_data$longitude, na.rm = TRUE),
-                lat2 = max(starbucks_data$latitude, na.rm = TRUE))
+      fitBounds(lng1 = min(starbucks_data()$longitude, na.rm = TRUE),
+                lat1 = min(starbucks_data()$latitude, na.rm = TRUE),
+                lng2 = max(starbucks_data()$longitude, na.rm = TRUE),
+                lat2 = max(starbucks_data()$latitude, na.rm = TRUE))
   })
   
   # Update Store Location Map
@@ -117,7 +98,7 @@ server <- function(input, output, session) {
   # Render Choropleth Map
   output$choropleth_map <- renderLeaflet({
     # Compute Starbucks store count by country
-    country_summary <- starbucks_data %>%
+    country_summary <- starbucks_data() %>%
       group_by(countryCode) %>%
       summarise(store_count = n())
     
@@ -150,9 +131,7 @@ server <- function(input, output, session) {
   
   # Render Table
   output$store_table <- renderTable({
-    data <- filtered_data()
-    req(nrow(data) > 0)  # Ensure table is not empty
-    data %>% select(storeNumber, full_address, ownershipTypeCode)
+    filtered_data() %>% select(storeNumber, full_address, ownershipTypeCode)
   })
 }
 
