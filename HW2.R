@@ -8,155 +8,128 @@ library(sf)
 library(rnaturalearth)
 library(rnaturalearthdata)
 
-# Load Data
-starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/startbucks.csv")
-
-# Data Preprocessing
-starbucks_data <- starbucks_data %>%
-  select(storeNumber, countryCode, ownershipTypeCode, latitude, longitude, streetAddressLine1, streetAddressLine2) %>%
-  mutate(full_address = ifelse(is.na(streetAddressLine2), streetAddressLine1, 
-                               paste(streetAddressLine1, streetAddressLine2, sep=", "))) %>%
-  na.omit()
-
 # UI Component
 ui <- fluidPage(
   titlePanel("Starbucks Global Store Analysis"),
   
+  # Filters
   fluidRow(
     column(4, selectInput("selected_country", "Select Country:",
-                          choices = c("ALL", unique(starbucks_data$countryCode)),  
+                          choices = c("ALL"),  
                           selected = "ALL")),
     column(4, selectInput("selected_ownership", "Select Ownership Type:",
                           choices = c("ALL", "Company Owned (CO)", "Licensed Store (LS)"),
                           selected = "ALL"))
   ),
   
+  # Tabs for different maps
   tabsetPanel(
-    tabPanel("Store Location Map", 
-             leafletOutput("map", height = "800px")),
-    
-    tabPanel("Choropleth Map", 
-             leafletOutput("choropleth_map", height = "800px"))
+    tabPanel("Store Location Map", leafletOutput("map", height = "1000px")),
+    tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "1000px"))
   ),
   
+  # Store table output
   fluidRow(
-    column(12, 
-           h3("Store Details"),
-           tableOutput("store_table"))
+    column(12, tableOutput("store_table"))
   )
 )
 
-# Server logic
+# Server Component
 server <- function(input, output, session) {
   
-  bounds <- reactiveValues(minLat = -90, maxLat = 90, minLon = -180, maxLon = 180)
-  
+  # Load Starbucks data (Inside server to avoid global scope issues)
+  starbucks_data <- reactive({
+    read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/main/startbucks.csv") %>%
+      select(storeNumber, countryCode, ownershipTypeCode, latitude, longitude, streetAddressLine1, streetAddressLine2) %>%
+      mutate(full_address = ifelse(is.na(streetAddressLine2), streetAddressLine1, 
+                                   paste(streetAddressLine1, streetAddressLine2, sep=", "))) %>%
+      na.omit()
+  })
+
+  # Update country list dynamically after data is loaded
   observe({
-    if (!is.null(input$map_bounds)) {
-      bounds$minLat <- input$map_bounds$south
-      bounds$maxLat <- input$map_bounds$north
-      bounds$minLon <- input$map_bounds$west
-      bounds$maxLon <- input$map_bounds$east
-    }
+    updateSelectInput(session, "selected_country", 
+                      choices = c("ALL", unique(starbucks_data()$countryCode)))
   })
   
+  # Reactive function to filter data
   filtered_data <- reactive({
-    data <- starbucks_data
+    data <- starbucks_data()
     
+    # Filter by country
     if (input$selected_country != "ALL") {
       data <- data %>% filter(countryCode == input$selected_country)
     }
     
+    # Filter by ownership type
     if (input$selected_ownership == "Company Owned (CO)") {
       data <- data %>% filter(ownershipTypeCode == "CO")
     } else if (input$selected_ownership == "Licensed Store (LS)") {
       data <- data %>% filter(ownershipTypeCode == "LS")
     }
     
-    data %>%
-      filter(latitude >= bounds$minLat & latitude <= bounds$maxLat,
-             longitude >= bounds$minLon & longitude <= bounds$maxLon)
+    return(data)
   })
   
+  # Render Store Location Map
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
-      fitBounds(lng1 = min(starbucks_data$longitude, na.rm = TRUE),
-                lat1 = min(starbucks_data$latitude, na.rm = TRUE),
-                lng2 = max(starbucks_data$longitude, na.rm = TRUE),
-                lat2 = max(starbucks_data$latitude, na.rm = TRUE)) %>%
-      addScaleBar(position = "bottomleft")
+      fitBounds(lng1 = min(starbucks_data()$longitude, na.rm = TRUE),
+                lat1 = min(starbucks_data()$latitude, na.rm = TRUE),
+                lng2 = max(starbucks_data()$longitude, na.rm = TRUE),
+                lat2 = max(starbucks_data()$latitude, na.rm = TRUE))
   })
   
+  # Update Store Location Map
   observe({
     data <- filtered_data()
     
     leafletProxy("map", data = data) %>%
       clearMarkers() %>%
-      addCircleMarkers(
-        ~longitude, ~latitude,
-        popup = ~paste("<b>Store Number:</b>", storeNumber,
-                      "<br><b>Address:</b>", full_address,
-                      "<br><b>Type:</b>", ownershipTypeCode),
-        radius = 4,
-        color = ~ifelse(ownershipTypeCode == "CO", "blue", "red"),
-        fillOpacity = 0.7,
-        stroke = FALSE
-      )
+      addCircleMarkers(~longitude, ~latitude, popup = ~paste("Address:", full_address),
+                       radius = 3, color = "blue", fillOpacity = 0.7)
   })
   
+  # Render Choropleth Map
   output$choropleth_map <- renderLeaflet({
-    country_summary <- starbucks_data %>%
+    # Compute Starbucks store count by country
+    country_summary <- starbucks_data() %>%
       group_by(countryCode) %>%
       summarise(store_count = n())
     
+    # Load world map
     world <- ne_countries(scale = "medium", returnclass = "sf")
     
-    world_starbucks <- left_join(world, country_summary, 
-                                by = c("iso_a2" = "countryCode"))
+    # Merge with Starbucks data
+    world_starbucks <- left_join(world, country_summary, by = c("iso_a2" = "countryCode"))
     
-    pal <- colorNumeric(
-      palette = "YlOrRd",
-      domain = world_starbucks$store_count,
-      na.color = "transparent"
-    )
+    # Define color palette
+    color_palette <- colorNumeric(palette = "YlOrRd", domain = world_starbucks$store_count, na.color = "transparent")
     
+    # Generate Choropleth map
     leaflet(world_starbucks) %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
       addPolygons(
-        fillColor = ~pal(store_count),
-        weight = 1,
-        color = "white",
-        fillOpacity = 0.7,
-        popup = ~paste(name, "<br>Stores:", store_count),
-        highlight = highlightOptions(
-          weight = 2,
-          color = "#666",
-          fillOpacity = 0.8,
-          bringToFront = TRUE
-        )
+        fillColor = ~color_palette(store_count),
+        weight = 1, color = "white", fillOpacity = 0.7,
+        popup = ~paste(name, "<br><b>Stores:</b>", store_count),
+        highlight = highlightOptions(weight = 3, color = "#666", bringToFront = TRUE)
       ) %>%
       addLegend(
-        position = "bottomright",
-        pal = pal,
-        values = ~store_count,
-        title = "Number of Stores",
-        opacity = 0.7
-      ) %>%
-      addScaleBar(position = "bottomleft")
+        position = "topright",
+        pal = color_palette,
+        values = world_starbucks$store_count,
+        title = "Starbucks Stores per Country",
+        opacity = 1
+      )
   })
   
+  # Render Table
   output$store_table <- renderTable({
-    filtered_data() %>%
-      select(storeNumber, full_address, ownershipTypeCode) %>%
-      rename(
-        "Store Number" = storeNumber,
-        "Address" = full_address,
-        "Ownership Type" = ownershipTypeCode
-      )
+    filtered_data() %>% select(storeNumber, full_address, ownershipTypeCode)
   })
 }
 
-# Run Shiny App with specified dimensions
-options(shiny.height = 1200)
+# Run Shiny App
 shinyApp(ui = ui, server = server)
