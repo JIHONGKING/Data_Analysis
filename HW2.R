@@ -1,14 +1,3 @@
----
-title: "HW2-Starbucks "
-author: "Jihong Min"
-date: "2025-02-20"
-output: 
-  html_document:
-    fig_height: 8
-    fig_width: 12
-runtime: shiny
----
-
 # Load necessary packages
 library(shiny)
 library(leaflet)
