@@ -1,4 +1,10 @@
-
+---
+title: "Starbucks Global Store Analysis"
+output: 
+  html_document:
+    fig_height: 12
+    fig_width: 12
+---
 
 # Load required libraries
 library(shiny)
