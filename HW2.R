@@ -2,15 +2,13 @@
 title: "HW2-Starbucks "
 author: "Jihong Min"
 date: "2025-02-20"
-output: html_document
+output: 
+  html_document:
+    fig_height: 8
+    fig_width: 12
 runtime: shiny
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r}
 # Load necessary packages
 library(shiny)
 library(leaflet)
@@ -24,11 +22,7 @@ library(rnaturalearthdata)
 # Load Data
 starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/startbucks.csv")
 
-```
 
-
-
-```{r}
 # Data Preprocessing
 starbucks_data <- starbucks_data %>%
   select(storeNumber, countryCode, ownershipTypeCode, latitude, longitude, streetAddressLine1, streetAddressLine2) %>%
@@ -36,9 +30,7 @@ starbucks_data <- starbucks_data %>%
                                paste(streetAddressLine1, streetAddressLine2, sep=", "))) %>%
   na.omit()
 
-```
 
-```{r}
 # UI Component
 # UI Component
 # UI Component
@@ -82,11 +74,6 @@ ui <- fluidPage(
 )
 
 
-
-```
-
-
-```{r}
 server <- function(input, output, session) {
   
   # Reactive values to store map bounds
@@ -191,5 +178,3 @@ output$choropleth_map <- renderLeaflet({
 # Run Shiny App
 shinyApp(ui = ui, server = server)
 
-
-```
