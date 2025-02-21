@@ -11,7 +11,6 @@ library(rnaturalearthdata)
 # Load Data
 starbucks_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/startbucks.csv")
 
-
 # Data Preprocessing
 starbucks_data <- starbucks_data %>%
   select(storeNumber, countryCode, ownershipTypeCode, latitude, longitude, streetAddressLine1, streetAddressLine2) %>%
@@ -19,17 +18,10 @@ starbucks_data <- starbucks_data %>%
                                paste(streetAddressLine1, streetAddressLine2, sep=", "))) %>%
   na.omit()
 
-
-# UI Component
-# UI Component
 # UI Component
 ui <- fluidPage(
   titlePanel("Starbucks Global Store Analysis"),
   
-  # Add spacing around filters
-  div(style = "margin-bottom: 30px;"),  # Extra spacing
-  
-  # Arrange filters horizontally
   fluidRow(
     column(4, selectInput("selected_country", "Select Country:",
                           choices = c("ALL", unique(starbucks_data$countryCode)),  
@@ -39,36 +31,26 @@ ui <- fluidPage(
                           selected = "ALL"))
   ),
   
-  div(style = "margin-bottom: 40px;"),  # Extra spacing before maps
-  
-  # Tabs to switch between maps
   tabsetPanel(
     tabPanel("Store Location Map", 
-             div(style = "margin-bottom: 20px;"),  # Spacing above map
-             leafletOutput("map", height = "400px")),
+             leafletOutput("map", height = "800px")),
     
     tabPanel("Choropleth Map", 
-             div(style = "margin-bottom: 20px;"),  # Spacing above map
-             leafletOutput("choropleth_map", height = "400px"))
+             leafletOutput("choropleth_map", height = "800px"))
   ),
   
-  div(style = "margin-bottom: 40px;"),  # Extra spacing before table
-  
-  # Display the filtered store table
   fluidRow(
-    column(12, tableOutput("store_table"))
-  ),
-  
-  div(style = "margin-bottom: 800px;")  # Extra spacing at the bottom
+    column(12, 
+           h3("Store Details"),
+           tableOutput("store_table"))
+  )
 )
 
-
+# Server logic
 server <- function(input, output, session) {
   
-  # Reactive values to store map bounds
   bounds <- reactiveValues(minLat = -90, maxLat = 90, minLon = -180, maxLon = 180)
   
-  # Update map bounds when user moves the map
   observe({
     if (!is.null(input$map_bounds)) {
       bounds$minLat <- input$map_bounds$south
@@ -78,92 +60,103 @@ server <- function(input, output, session) {
     }
   })
   
-  # Reactive function to filter data based on selections & visible area
   filtered_data <- reactive({
     data <- starbucks_data
-
-    # Filter by country if not "ALL"
+    
     if (input$selected_country != "ALL") {
       data <- data %>% filter(countryCode == input$selected_country)
     }
-
-    # Filter by ownership type if not "ALL"
+    
     if (input$selected_ownership == "Company Owned (CO)") {
       data <- data %>% filter(ownershipTypeCode == "CO")
     } else if (input$selected_ownership == "Licensed Store (LS)") {
       data <- data %>% filter(ownershipTypeCode == "LS")
     }
-
-    # Filter data based on map bounds (only show visible stores)
-    data <- data %>%
+    
+    data %>%
       filter(latitude >= bounds$minLat & latitude <= bounds$maxLat,
              longitude >= bounds$minLon & longitude <= bounds$maxLon)
-
-    return(data)
   })
   
-  # Initialize Leaflet map
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
       fitBounds(lng1 = min(starbucks_data$longitude, na.rm = TRUE),
                 lat1 = min(starbucks_data$latitude, na.rm = TRUE),
                 lng2 = max(starbucks_data$longitude, na.rm = TRUE),
-                lat2 = max(starbucks_data$latitude, na.rm = TRUE))
+                lat2 = max(starbucks_data$latitude, na.rm = TRUE)) %>%
+      addScaleBar(position = "bottomleft")
   })
   
-  # Update store location map when filters change
   observe({
     data <- filtered_data()
-
+    
     leafletProxy("map", data = data) %>%
       clearMarkers() %>%
-      addCircleMarkers(~longitude, ~latitude, popup = ~paste("Address:", full_address),
-                       radius = 3, color = "blue", fillOpacity = 0.7)
+      addCircleMarkers(
+        ~longitude, ~latitude,
+        popup = ~paste("<b>Store Number:</b>", storeNumber,
+                      "<br><b>Address:</b>", full_address,
+                      "<br><b>Type:</b>", ownershipTypeCode),
+        radius = 4,
+        color = ~ifelse(ownershipTypeCode == "CO", "blue", "red"),
+        fillOpacity = 0.7,
+        stroke = FALSE
+      )
   })
   
-  # Display only visible store list
-  output$store_table <- renderTable({
-    filtered_data() %>% select(storeNumber, full_address, ownershipTypeCode)
-  })
-  
-  # Choropleth Map (Heat Map)
-  # Choropleth Map (Heat Map with improved colors and legend)
-output$choropleth_map <- renderLeaflet({
-  # Compute country-level Starbucks store count
-  country_summary <- starbucks_data %>%
-    group_by(countryCode) %>%
-    summarise(store_count = n())
-
-  # Load world map data
-  world <- ne_countries(scale = "medium", returnclass = "sf")
-
-  # Merge with Starbucks data
-  world_starbucks <- left_join(world, country_summary, by = c("iso_a2" = "countryCode"))
-
-  # Define new color palette (Yellow → Orange → Red)
-  color_palette <- colorNumeric(palette = "YlOrRd", domain = world_starbucks$store_count, na.color = "transparent")
-
-  # Generate Choropleth map with a legend
-  leaflet(world_starbucks) %>%
-    addProviderTiles(providers$CartoDB.Positron) %>%
-    addPolygons(
-      fillColor = ~color_palette(store_count),
-      weight = 1, color = "white", fillOpacity = 0.7,
-      popup = ~paste(name, "<br><b>Stores:</b>", store_count),
-      highlight = highlightOptions(weight = 3, color = "#666", bringToFront = TRUE)
-    ) %>%
-    addLegend(
-      position = "topright",
-      pal = color_palette,
-      values = world_starbucks$store_count,
-      title = "Starbucks Stores per Country",
-      opacity = 1
+  output$choropleth_map <- renderLeaflet({
+    country_summary <- starbucks_data %>%
+      group_by(countryCode) %>%
+      summarise(store_count = n())
+    
+    world <- ne_countries(scale = "medium", returnclass = "sf")
+    
+    world_starbucks <- left_join(world, country_summary, 
+                                by = c("iso_a2" = "countryCode"))
+    
+    pal <- colorNumeric(
+      palette = "YlOrRd",
+      domain = world_starbucks$store_count,
+      na.color = "transparent"
     )
-})
-
+    
+    leaflet(world_starbucks) %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addPolygons(
+        fillColor = ~pal(store_count),
+        weight = 1,
+        color = "white",
+        fillOpacity = 0.7,
+        popup = ~paste(name, "<br>Stores:", store_count),
+        highlight = highlightOptions(
+          weight = 2,
+          color = "#666",
+          fillOpacity = 0.8,
+          bringToFront = TRUE
+        )
+      ) %>%
+      addLegend(
+        position = "bottomright",
+        pal = pal,
+        values = ~store_count,
+        title = "Number of Stores",
+        opacity = 0.7
+      ) %>%
+      addScaleBar(position = "bottomleft")
+  })
+  
+  output$store_table <- renderTable({
+    filtered_data() %>%
+      select(storeNumber, full_address, ownershipTypeCode) %>%
+      rename(
+        "Store Number" = storeNumber,
+        "Address" = full_address,
+        "Ownership Type" = ownershipTypeCode
+      )
+  })
 }
 
-# Run Shiny App
+# Run Shiny App with specified dimensions
+options(shiny.height = 1200)
 shinyApp(ui = ui, server = server)
-
