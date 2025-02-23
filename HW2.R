@@ -1,3 +1,7 @@
+# HW2 - Starbucks Global Store Analysis
+# Author: Jihong Min
+# Date: 2025-02-20
+
 # Load necessary packages
 library(shiny)
 library(leaflet)
@@ -12,7 +16,7 @@ library(rnaturalearthdata)
 ui <- fluidPage(
   titlePanel("Starbucks Global Store Analysis"),
   
-  # Filters
+  # Filters (Improved Layout)
   fluidRow(
     column(4, selectInput("selected_country", "Select Country:",
                           choices = c("ALL"),  
@@ -22,11 +26,15 @@ ui <- fluidPage(
                           selected = "ALL"))
   ),
   
+  div(style = "margin-top: 20px; margin-bottom: 20px;"),  # Adjusted Spacing
+  
   # Tabs for different maps
   tabsetPanel(
-    tabPanel("Store Location Map", leafletOutput("map", height = "600px")),
-    tabPanel("Choropleth Map", leafletOutput("choropleth_map", height = "600px"))
+    tabPanel("📍 Store Location Map", leafletOutput("map", height = "700px")),
+    tabPanel("🌎 Choropleth Map", leafletOutput("choropleth_map", height = "700px"))
   ),
+  
+  div(style = "margin-top: 20px; margin-bottom: 20px;"),
   
   # Store table output
   fluidRow(
@@ -87,7 +95,7 @@ server <- function(input, output, session) {
     
     leafletProxy("map", data = data) %>%
       clearMarkers() %>%
-      addCircleMarkers(~longitude, ~latitude, popup = ~paste("Address:", full_address),
+      addCircleMarkers(~longitude, ~latitude, popup = ~paste("📍 Address:", full_address),
                        radius = 3, color = "blue", fillOpacity = 0.7)
   })
   
@@ -97,23 +105,26 @@ server <- function(input, output, session) {
     country_summary <- starbucks_data() %>%
       group_by(countryCode) %>%
       summarise(store_count = n())
-    
+
     # Load world map
     world <- ne_countries(scale = "medium", returnclass = "sf")
-    
+
     # Merge with Starbucks data
     world_starbucks <- left_join(world, country_summary, by = c("iso_a2" = "countryCode"))
-    
-    # Define color palette
-    color_palette <- colorNumeric(palette = "YlOrRd", domain = world_starbucks$store_count, na.color = "transparent")
-    
+
+    # Handle missing values in store_count
+    world_starbucks$store_count[is.na(world_starbucks$store_count)] <- 0
+
+    # Define improved color palette for visibility
+    color_palette <- colorNumeric(palette = "Blues", domain = world_starbucks$store_count, na.color = "lightgray")
+
     # Generate Choropleth map
     leaflet(world_starbucks) %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
       addPolygons(
         fillColor = ~color_palette(store_count),
         weight = 1, color = "white", fillOpacity = 0.7,
-        popup = ~paste(name, "<br><b>Stores:</b>", store_count),
+        popup = ~paste("<b>", name, "</b><br>☕ Stores: ", store_count),
         highlight = highlightOptions(weight = 3, color = "#666", bringToFront = TRUE)
       ) %>%
       addLegend(
