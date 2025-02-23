@@ -30,8 +30,8 @@ ui <- fluidPage(
   
   # Tabs for different maps
   tabsetPanel(
-    tabPanel("📍 Store Location Map", leafletOutput("map", height = "400px")),
-    tabPanel("🌎 Choropleth Map", leafletOutput("choropleth_map", height = "4oopx"))
+    tabPanel("📍 Store Location Map", leafletOutput("map", height = "200px")),
+    tabPanel("🌎 Choropleth Map", leafletOutput("choropleth_map", height = "200px"))
   ),
   
   div(style = "margin-top: 20px; margin-bottom: 20px;"),
