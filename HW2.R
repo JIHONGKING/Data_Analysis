@@ -16,6 +16,29 @@ library(rnaturalearthdata)
 ui <- fluidPage(
   titlePanel("Starbucks Global Store Analysis"),
   
+  # Add CSS for better responsiveness
+  tags$head(
+    tags$style(HTML("
+      .leaflet-container {
+        height: 100%;
+        min-height: 350px;
+        max-height: 500px;
+        width: 100%;
+      }
+      .map-container {
+        position: relative;
+        height: 350px;
+        width: 100%;
+        margin-bottom: 15px;
+      }
+      @media (max-width: 768px) {
+        .map-container {
+          height: 300px;
+        }
+      }
+    "))
+  ),
+  
   # Filters (Improved Layout)
   fluidRow(
     column(4, selectInput("selected_country", "Select Country:",
@@ -26,19 +49,23 @@ ui <- fluidPage(
                           selected = "ALL"))
   ),
   
-  div(style = "margin-top: 20px; margin-bottom: 20px;"),  # Adjusted Spacing
+  div(style = "margin-top: 10px; margin-bottom: 10px;"),  # Reduced Spacing
   
-  # Tabs for different maps
+  # Tabs for different maps with responsive height
   tabsetPanel(
-    tabPanel("📍 Store Location Map", leafletOutput("map", height = "400px")),
-    tabPanel("🌎 Choropleth Map", leafletOutput("choropleth_map", height = "400px"))
+    tabPanel("📍 Store Location Map", 
+             div(class = "map-container", leafletOutput("map", height = "100%"))),
+    tabPanel("🌎 Choropleth Map", 
+             div(class = "map-container", leafletOutput("choropleth_map", height = "100%")))
   ),
   
-  div(style = "margin-top: 20px; margin-bottom: 20px;"),
+  div(style = "margin-top: 10px; margin-bottom: 10px;"),  # Reduced Spacing
   
   # Store table output
   fluidRow(
-    column(12, tableOutput("store_table"))
+    column(12, 
+           div(style = "height: 300px; overflow-y: auto;", 
+               tableOutput("store_table")))
   )
 )
 
@@ -136,9 +163,11 @@ server <- function(input, output, session) {
       )
   })
   
-  # Render Table
+  # Render Table with controlled height
   output$store_table <- renderTable({
-    filtered_data() %>% select(storeNumber, full_address, ownershipTypeCode)
+    filtered_data() %>% 
+      select(storeNumber, full_address, ownershipTypeCode) %>%
+      head(100)  # Limit the number of rows to prevent excessive scrolling
   })
 }
 
