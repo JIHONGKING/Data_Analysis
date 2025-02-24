@@ -1,0 +1,80 @@
+---
+title: "HW2: Starbucks Global Store Analysis"
+author: "Jihong Min"
+date: "2025-02-20"
+output: 
+  html_document
+runtime: shiny
+---
+
+
+```{r, echo = FALSE}
+library(knitr)
+library(shiny)
+library(leaflet)
+
+#opts_knit$set(base_dir = "/", base.url = "/")
+opts_chunk$set(
+  warning = FALSE,
+  message = FALSE
+  )
+```
+
+```{r code=readLines("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/HW2.R")}
+```
+
+## **Introduction**  
+
+This project explores **Starbucks' global store distribution** using **Shiny**, an interactive web framework for R.  
+
+- **Dataset Source:** [Starbucks Locations Worldwide 2021 (Kaggle)](https://www.kaggle.com/datasets/kukuroo3/starbucks-locations-worldwide-2021-version)  
+- **Scope:** Covers **over 28,000 stores across 49 countries**  
+- **Key Attributes:** Includes **store locations, ownership types, and operational status**  
+
+## **Objective**  
+
+The goal of this project is to:  
+- **Visualize Starbucks' store locations** dynamically using an interactive **Leaflet map**  
+- **Analyze the geographical distribution** of Starbucks stores using **choropleth heat maps**  
+- Implement **dynamic filtering options** based on **country and ownership type**  
+- Utilize **Shiny's reactive programming** to allow real-time updates and smooth user interactions  
+
+## **Data and Methods**  
+
+- **Data Cleaning & Preprocessing:**  
+  - Extract relevant **columns** (e.g., `countryCode`, `ownershipTypeCode`, `latitude`, `longitude`)  
+  - Remove **missing values** and format addresses for consistency  
+  - Convert data into a structure suitable for **Shiny's reactive framework**  
+
+- **Interactive Components:**  
+  - **Dynamic filters**: Users can select a **specific country** or ownership type  
+  - **Interactive Map**: Displays stores using **Leaflet** with **popup details**  
+  - **Heatmap Visualization**: Highlights **regional density** of stores  
+
+## **Application Implementation**  
+
+- **Shiny UI Components:**  
+  - **Dropdown filters** for selecting **country & ownership type**  
+  - **Tab-based navigation** for **store location map & heatmap**  
+  - **Store table output** displaying filtered results  
+
+- **Shiny Server Logic:**  
+  - **Reactive data filtering**: Updates displayed stores based on user inputs  
+  - **Map interactions**: Users can zoom in/out, pan, and interact with store locations  
+  - **Color-coded heatmap**: Represents store density per country  
+
+## **Findings & Insights**  
+
+- The **United States** has the highest number of Starbucks stores, followed by **China and Canada**.  
+- There is a **higher concentration of company-owned stores (CO) in North America**, whereas **licensed stores (LS) dominate in Asia & the Middle East**.  
+- The **choropleth heatmap** effectively visualizes the Starbucks store density across the world.  
+
+## **Conclusion**  
+
+This project successfully leverages **Shiny's interactivity** to explore and analyze **Starbucks' global presence**.  
+Future improvements could include:  
+- **Time-series analysis** to track **Starbucks' expansion trends**  
+- **Integration with financial data** to examine store profitability by region  
+- **Enhancing UI/UX** with additional **data visualizations**  
+
+
