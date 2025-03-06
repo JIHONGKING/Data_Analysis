@@ -20,7 +20,7 @@ opts_chunk$set(
   )
 ```
 
-```{r code=readLines("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/HW2.R")}
+```{r code=readLines("https://raw.githubusercontent.com/JIHONGKING/Min/refs/heads/main/starbucks_r.R")}
 ```
 
 ## **Introduction**  
