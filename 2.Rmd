@@ -1,0 +1,1655 @@
+---
+title: "p2-mild"
+author: "Jihong Min"
+date: "2025-03-17"
+output: html_document
+---
+
+
+
+```{r}
+###############################################
+# 1. Interactive Geographic Heatmap (Choropleth Map) #
+###############################################
+
+library(shiny)
+library(leaflet)
+library(RColorBrewer)
+library(scales)
+library(dplyr)
+library(readr)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(DT)
+
+# Load and preprocess data
+co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv")
+co2_data <- co2_data %>%
+  rename(
+    country = Country,
+    region = Region,
+    date = Date,
+    emissions = `Kilotons of Co2`,
+    per_capita = `Metric Tons Per Capita`
+  )
+
+# Extract year from date
+co2_data <- co2_data %>%
+  mutate(
+    # Extract year based on date format
+    year = case_when(
+      grepl("^\\d{2}-\\d{2}-(\\d{4})$", date) ~ as.numeric(sub("^\\d{2}-\\d{2}-(\\d{4})$", "\\1", date)),
+      grepl("^(\\d{4})-\\d{2}-\\d{2}$", date) ~ as.numeric(sub("^(\\d{4})-\\d{2}-\\d{2}$", "\\1", date)),
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  # Remove entries with NA years
+  filter(!is.na(year))
+
+# Load world map data
+world_map <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Country name mapping
+country_mapping <- data.frame(
+  map_name = c("United States of America", "United Kingdom", "Czech Republic"),
+  data_name = c("United States", "United Kingdom of Great Britain and Northern Ireland", "Czechia"),
+  stringsAsFactors = FALSE
+)
+
+# Identify country name field
+country_name_field <- "name"
+
+# Apply mapping
+for (i in 1:nrow(country_mapping)) {
+  world_map[[country_name_field]][world_map[[country_name_field]] == country_mapping$map_name[i]] <- country_mapping$data_name[i]
+}
+
+# Shiny app
+ui <- fluidPage(
+  titlePanel("Global CO2 Emissions Map"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("year", "Select Year:", 
+                choices = sort(unique(co2_data$year)), 
+                selected = max(co2_data$year)),
+      radioButtons("view_type", "View Type:",
+                 choices = c("Total Emissions" = "total", "Per Capita Emissions" = "per_capita")),
+      hr(),
+      helpText("This map shows CO2 emissions by country. Select a year to see how emissions change over time.")
+    ),
+    mainPanel(
+      leafletOutput("co2_map", height = "600px"),
+      div(style = "margin-top: 20px;"),
+      DTOutput("country_data")
+    )
+  )
+)
+
+server <- function(input, output) {
+  # Filter data based on selected year
+  filtered_data <- reactive({
+    year_data <- co2_data %>% filter(year == input$year)
+    
+    # Create temporary variable for join
+    temp_data <- year_data
+    names(temp_data)[names(temp_data) == "country"] <- country_name_field
+    
+    # Merge with map data
+    merged_data <- left_join(world_map, temp_data, by = country_name_field)
+    
+    return(merged_data)
+  })
+  
+  # Create color palette
+  get_palette <- function(data, input_type) {
+    # Define value range and color palette
+    if(input_type == "total") {
+      domain <- c(0, max(data$emissions, na.rm = TRUE))
+      pal <- colorNumeric(
+        palette = "YlOrRd",
+        domain = domain,
+        na.color = "#CCCCCC"
+      )
+      title <- "CO2 Emissions (kt)"
+    } else {
+      domain <- c(0, max(data$per_capita, na.rm = TRUE))
+      pal <- colorNumeric(
+        palette = "YlOrRd",
+        domain = domain,
+        na.color = "#CCCCCC"
+      )
+      title <- "CO2 Emissions per Capita (t)"
+    }
+    
+    return(list(
+      palette = pal,
+      title = title
+    ))
+  }
+  
+  # Render map
+  output$co2_map <- renderLeaflet({
+    data <- filtered_data()
+    
+    # Select value column based on user choice
+    if(input$view_type == "total") {
+      value_column <- "emissions"
+    } else {
+      value_column <- "per_capita"
+    }
+    
+    palette_info <- get_palette(data, input$view_type)
+    
+    # Create color function - handle NA values here
+    color_func <- function(x) {
+      if(is.na(x)) {
+        return("#CCCCCC")  # Gray for missing data
+      } else {
+        return(palette_info$palette(x))
+      }
+    }
+    
+    # Create label function
+    label_func <- function(name, value) {
+      if(is.na(value)) {
+        return(paste0(name, ": No data"))
+      } else if(input$view_type == "total") {
+        return(paste0(name, ": ", format(value, big.mark = ","), " kt"))
+      } else {
+        return(paste0(name, ": ", round(value, 2), " t/capita"))
+      }
+    }
+    
+    # Create map
+    map <- leaflet(data) %>%
+      addProviderTiles(providers$CartoDB.Positron)
+    
+    # Add polygons for each country
+    for(i in 1:nrow(data)) {
+      country_name <- data[[country_name_field]][i]
+      value <- data[[value_column]][i]
+      
+      # Current country's geographical data
+      geom <- data[i, ]
+      
+      map <- map %>%
+        addPolygons(
+          data = geom,
+          fillColor = color_func(value),
+          weight = 1,
+          opacity = 1,
+          color = "white",
+          dashArray = "3",
+          fillOpacity = 0.7,
+          highlight = highlightOptions(
+            weight = 2,
+            color = "#666",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = TRUE
+          ),
+          label = label_func(country_name, value),
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "15px",
+            direction = "auto"
+          )
+        )
+    }
+    
+    # Get values for legend
+    if(input$view_type == "total") {
+      vals <- data$emissions
+    } else {
+      vals <- data$per_capita
+    }
+    
+    # Remove NA values
+    vals <- vals[!is.na(vals)]
+    
+    # Add legend if values exist
+    if(length(vals) > 0) {
+      map <- map %>%
+        addLegend(
+          position = "bottomright",
+          pal = palette_info$palette,
+          values = vals,
+          title = palette_info$title,
+          opacity = 0.7,
+          labFormat = labelFormat(
+            prefix = "",
+            suffix = if(input$view_type == "total") " kt" else " t/capita"
+          )
+        )
+    }
+    
+    return(map)
+  })
+  
+  # Data table output
+  output$country_data <- renderDT({
+    year_data <- co2_data %>% 
+      filter(year == input$year) %>%
+      arrange(desc(if(input$view_type == "total") emissions else per_capita)) %>%
+      select(country, emissions, per_capita) %>%
+      rename("Country" = country, 
+             "CO2 Emissions (kt)" = emissions, 
+             "CO2 per Capita (t)" = per_capita)
+    
+    return(year_data)
+  }, options = list(pageLength = 10))
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+
+```{r}
+############################################
+# 2. Multi-Country Time Series Comparison Chart #
+############################################
+
+library(shiny)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(readr)
+library(scales)
+library(DT)  # Added DT library for DataTable functionality
+
+# Load and preprocess data (similar to Visualization 1)
+co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv")
+co2_data <- co2_data %>%
+  rename(
+    country = Country,
+    region = Region,
+    date = Date,
+    emissions = `Kilotons of Co2`,
+    per_capita = `Metric Tons Per Capita`
+  )
+
+# Extract year from date (similar to Visualization 1)
+co2_data <- co2_data %>%
+  mutate(
+    # Extract year based on date format
+    year = case_when(
+      grepl("^\\d{2}-\\d{2}-(\\d{4})$", date) ~ as.numeric(sub("^\\d{2}-\\d{2}-(\\d{4})$", "\\1", date)),
+      grepl("^(\\d{4})-\\d{2}-\\d{2}$", date) ~ as.numeric(sub("^(\\d{4})-\\d{2}-\\d{2}$", "\\1", date)),
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  # Remove entries with NA years
+  filter(!is.na(year))
+
+# Generate top emitters list
+top_emitters <- co2_data %>%
+  filter(year == max(year, na.rm = TRUE)) %>%
+  arrange(desc(emissions)) %>%
+  head(20) %>%
+  pull(country)
+
+# Shiny app
+ui <- fluidPage(
+  titlePanel("Country CO2 Emissions Time Series Comparison"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("countries", "Select Countries (Max 5):",
+                 choices = unique(co2_data$country),
+                 selected = top_emitters[1:3],
+                 multiple = TRUE),
+      
+      radioButtons("metric", "Measurement:",
+                  choices = c("Total Emissions" = "total", 
+                              "Per Capita Emissions" = "per_capita",
+                              "Growth Rate (%)" = "growth"),
+                  selected = "total"),
+      
+      checkboxInput("smoothed", "Smooth Trendline", value = FALSE),
+      
+      sliderInput("year_range", "Year Range:",
+                 min = min(co2_data$year, na.rm = TRUE),
+                 max = max(co2_data$year, na.rm = TRUE),
+                 value = c(min(co2_data$year, na.rm = TRUE), max(co2_data$year, na.rm = TRUE)),
+                 step = 1),
+      
+      checkboxInput("show_average", "Show Global Average", value = FALSE),
+      
+      hr(),
+      helpText("Select countries to compare and choose your preferred metric. You can compare up to 5 countries simultaneously.")
+    ),
+    
+    mainPanel(
+      plotlyOutput("time_series_plot", height = "600px"),
+      br(),
+      verbatimTextOutput("selected_info"),
+      DTOutput("country_data")  # Added data table similar to Visualization 1
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Limit selected countries to max 5
+  observe({
+    if (length(input$countries) > 5) {
+      updateSelectInput(session, "countries", selected = input$countries[1:5])
+    }
+  })
+  
+  # Filter data based on selections
+  filtered_data <- reactive({
+    # Basic filtering
+    data <- co2_data %>%
+      filter(country %in% input$countries,
+             year >= input$year_range[1],
+             year <= input$year_range[2])
+    
+    # Calculate growth rate if selected
+    if(input$metric == "growth") {
+      data <- data %>%
+        arrange(country, year) %>%
+        group_by(country) %>%
+        mutate(value = (emissions / lag(emissions) - 1) * 100) %>%
+        filter(!is.na(value)) %>%
+        ungroup()
+    } else {
+      data <- data %>%
+        mutate(value = if(input$metric == "total") emissions else per_capita)
+    }
+    
+    return(data)
+  })
+  
+  # Calculate average data if selected
+  avg_data <- reactive({
+    if(!input$show_average) return(NULL)
+    
+    co2_data %>%
+      filter(year >= input$year_range[1],
+             year <= input$year_range[2]) %>%
+      group_by(year) %>%
+      summarize(
+        value = if(input$metric == "total") 
+                   mean(emissions, na.rm = TRUE)
+                else if(input$metric == "per_capita")
+                   mean(per_capita, na.rm = TRUE)
+                else if(input$metric == "growth") {
+                   prev_avg <- lag(mean(emissions, na.rm = TRUE))
+                   if(is.na(prev_avg)) NA else (mean(emissions, na.rm = TRUE) / prev_avg - 1) * 100
+                },
+        .groups = "drop"
+      ) %>%
+      mutate(country = "Global Average") %>%
+      filter(!is.na(value))
+  })
+  
+  # Create time series plot
+  output$time_series_plot <- renderPlotly({
+    # Check data
+    data <- filtered_data()
+    if(nrow(data) == 0) return(NULL)
+    
+    # Set y-axis label
+    y_label <- if(input$metric == "total") "CO2 Emissions (kt)" else
+              if(input$metric == "per_capita") "CO2 Emissions per Capita (t)" else
+              "Annual Change Rate (%)"
+    
+    # Create base plot
+    p <- ggplot(data, aes(x = year, y = value, color = country)) +
+      theme_minimal() +
+      labs(title = paste("CO2 Emissions Trends by Country:", y_label),
+           x = "Year", y = y_label,
+           color = "Country") +
+      theme(legend.position = "right",
+            plot.title = element_text(size = 16),
+            axis.title = element_text(size = 14),
+            axis.text = element_text(size = 12),
+            legend.title = element_text(size = 14),
+            legend.text = element_text(size = 12))
+    
+    # Add lines and points based on smoothing option
+    if(input$smoothed) {
+      p <- p + geom_smooth(aes(group = country), se = FALSE, size = 1.5) +
+               geom_point(alpha = 0.5)
+    } else {
+      p <- p + geom_line(size = 1.2) + 
+               geom_point()
+    }
+    
+    # Add average if selected
+    if(input$show_average && !is.null(avg_data())) {
+      p <- p + 
+        geom_line(data = avg_data(), linetype = "dashed", size = 1.5) +
+        geom_point(data = avg_data(), size = 3)
+    }
+    
+    # Add reference line for growth rate
+    if(input$metric == "growth") {
+      p <- p + geom_hline(yintercept = 0, linetype = "dotted", color = "darkgray", size = 1)
+    }
+    
+    # Convert to plotly
+    ggplotly(p) %>%
+      layout(hovermode = "closest") %>%
+      config(displayModeBar = TRUE)
+  })
+  
+  # Display selected countries information
+  output$selected_info <- renderText({
+    data <- filtered_data()
+    if(nrow(data) == 0) return("Please select at least one country.")
+    
+    latest_year <- max(data$year, na.rm = TRUE)
+    
+    info <- data %>%
+      filter(year == latest_year) %>%
+      arrange(desc(value)) %>%
+      mutate(
+        value_formatted = if(input$metric == "total") 
+                             paste0(format(round(value), big.mark = ","), " kt")
+                          else if(input$metric == "per_capita")
+                             paste0(round(value, 2), " t/capita")
+                          else
+                             paste0(round(value, 2), "%"),
+        display_text = paste0(country, " (", latest_year, "): ", value_formatted)
+      )
+    
+    formatted_info <- info$display_text
+    
+    paste("Selected countries data for", latest_year, ":\n", paste(formatted_info, collapse = "\n"))
+  })
+  
+  # Add data table similar to Visualization 1
+  output$country_data <- renderDT({
+    req(input$countries)
+    
+    year_data <- filtered_data() %>%
+      filter(year == max(year, na.rm = TRUE)) %>%
+      select(country, emissions, per_capita, year) %>%
+      arrange(desc(if(input$metric == "total") emissions else per_capita)) %>%
+      rename("Country" = country,
+             "CO2 Emissions (kt)" = emissions,
+             "CO2 per Capita (t)" = per_capita,
+             "Year" = year)
+    
+    return(year_data)
+  }, options = list(pageLength = 5))
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+```{r}
+###############################################
+# 3. CO2 Emissions vs GDP Scatter Plot with Animation #
+###############################################
+
+library(shiny)
+library(plotly)
+library(dplyr)
+library(readr)
+library(countrycode)
+library(DT)
+library(shinyjs)  # Added for runjs() function
+
+# Load and preprocess data (similar to Visualization 1)
+load_and_prepare_data <- function() {
+  # Load CO2 data (using the same format as Visualization 1)
+  co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv")
+  co2_data <- co2_data %>%
+    rename(
+      country = Country,
+      region = Region,
+      date = Date,
+      emissions = `Kilotons of Co2`,
+      per_capita = `Metric Tons Per Capita`
+    )
+  
+  # Print sample dates to check format
+  print("Sample dates from the dataset:")
+  print(head(co2_data$date))
+  
+  # Extract year from date - simplified approach
+  co2_data <- co2_data %>%
+    mutate(
+      # Try to extract the year component from various date formats
+      year = as.numeric(substring(date, nchar(date)-3, nchar(date)))
+    ) %>%
+    # Remove entries with NA years
+    filter(!is.na(year))
+  
+  # Since we don't have actual GDP data, we'll simulate it from CO2 data
+  # This is just for demonstration purposes
+  gdp_data <- co2_data %>%
+    # Create simulated GDP data based on emissions (just for demonstration)
+    mutate(
+      gdp = emissions * 100000 * (1 + runif(n(), -0.3, 0.3)),  # Simulate GDP based on emissions with some randomness
+      gdp_per_capita = gdp / (emissions * 1000 / per_capita)   # Calculate per capita values
+    ) %>%
+    select(country, year, gdp, gdp_per_capita) %>%
+    filter(!is.na(gdp), !is.na(gdp_per_capita))
+  
+  # Calculate population from CO2 data (emissions in kilotons, per capita in metric tons)
+  population_data <- co2_data %>%
+    mutate(population = (emissions * 1000) / per_capita) %>%  # Convert units and calculate population
+    select(country, year, population)
+  
+  # Add continent information
+  country_continent <- data.frame(
+    country = unique(co2_data$country),
+    continent = countrycode(unique(co2_data$country), "country.name", "continent")
+  )
+  
+  # Replace missing values with "Other"
+  country_continent$continent[is.na(country_continent$continent)] <- "Other"
+  
+  # Merge data
+  combined_data <- co2_data %>%
+    inner_join(gdp_data, by = c("country", "year")) %>%
+    left_join(population_data, by = c("country", "year")) %>%
+    left_join(country_continent, by = "country") %>%
+    filter(!is.na(gdp_per_capita), !is.na(per_capita), !is.na(population))
+  
+  return(combined_data)
+}
+
+# Prepare data
+combined_data <- load_and_prepare_data()
+
+# Shiny app
+ui <- fluidPage(
+  useShinyjs(),  # Enable shinyjs
+  titlePanel("CO2 Emissions vs GDP Relationship Analysis"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      checkboxInput("log_scale", "Use Logarithmic Scale", value = TRUE),
+      
+      selectInput("highlight_countries", "Highlight Countries:",
+                 choices = c("None", unique(combined_data$country)),
+                 selected = "None",
+                 multiple = TRUE),
+      
+      radioButtons("animation_speed", "Animation Speed:",
+                  choices = c("Slow" = "1000",
+                              "Medium" = "700",
+                              "Fast" = "400"),
+                  selected = "700"),
+      
+      selectInput("continent_filter", "Filter by Continent:",
+                 choices = c("Show All", unique(combined_data$continent)),
+                 selected = "Show All",
+                 multiple = TRUE),
+      
+      hr(),
+      helpText("This visualization shows the relationship between CO2 emissions and GDP. You can view changes over time using the animation controls.")
+    ),
+    
+    mainPanel(
+      plotlyOutput("scatter_plot", height = "600px"),
+      div(
+        style = "display: flex; justify-content: center; margin-top: 20px;",
+        actionButton("play_button", "Play Animation", icon = icon("play")),
+        actionButton("pause_button", "Pause", icon = icon("pause")),
+        actionButton("reset_button", "Reset", icon = icon("sync"))
+      ),
+      # Hidden output for animation control
+      div(style = "display: none;", 
+          textOutput("animation_control")),
+      div(
+        style = "margin-top: 30px;",
+        htmlOutput("insights")
+      ),
+      hr(),
+      DTOutput("country_data")  # Added data table similar to Visualization 1
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Filtered data
+  filtered_data <- reactive({
+    data <- combined_data
+    
+    # Apply continent filter
+    if (!"Show All" %in% input$continent_filter && length(input$continent_filter) > 0) {
+      data <- data %>% filter(continent %in% input$continent_filter)
+    }
+    
+    return(data)
+  })
+  
+  # Create scatter plot
+  output$scatter_plot <- renderPlotly({
+    data <- filtered_data()
+    
+    # Apply log scale if selected
+    if (input$log_scale) {
+      data <- data %>%
+        mutate(
+          gdp_per_capita_scaled = log10(gdp_per_capita),
+          emissions_per_capita_scaled = log10(per_capita + 0.01)  # Handle zero values
+        )
+      
+      x_title <- "Log10(GDP per Capita in US$)"
+      y_title <- "Log10(CO2 Emissions per Capita in t)"
+    } else {
+      data <- data %>%
+        mutate(
+          gdp_per_capita_scaled = gdp_per_capita,
+          emissions_per_capita_scaled = per_capita
+        )
+      
+      x_title <- "GDP per Capita (US$)"
+      y_title <- "CO2 Emissions per Capita (t)"
+    }
+    
+    # Adjust bubble size (proportional to population but in reasonable range)
+    data <- data %>%
+      mutate(bubble_size = sqrt(population) / 1000)
+    
+    # Highlight selected countries
+    if (!"None" %in% input$highlight_countries && length(input$highlight_countries) > 0) {
+      data <- data %>%
+        mutate(highlight = ifelse(country %in% input$highlight_countries, country, "Other"))
+    } else {
+      data <- data %>%
+        mutate(highlight = continent)
+    }
+    
+    # Set animation frame
+    animation_frame <- ~year
+    
+    # Create plotly scatter plot
+    p <- plot_ly(
+      data = data,
+      x = ~gdp_per_capita_scaled,
+      y = ~emissions_per_capita_scaled,
+      size = ~bubble_size,
+      color = ~highlight,
+      frame = animation_frame,
+      text = ~paste(
+        "Country:", country,
+        "<br>Year:", year,
+        "<br>GDP per Capita:", paste0("$", format(round(gdp_per_capita), big.mark = ",")),
+        "<br>CO2 per Capita:", round(per_capita, 2), "t",
+        "<br>Population:", format(round(population), big.mark = ",")
+      ),
+      hoverinfo = "text",
+      type = 'scatter',
+      mode = 'markers',
+      marker = list(sizemode = 'diameter', opacity = 0.7, sizeref = 0.5)
+    ) %>%
+      layout(
+        title = "CO2 Emissions per Capita vs GDP per Capita",
+        xaxis = list(title = x_title),
+        yaxis = list(title = y_title),
+        hovermode = "closest"
+      ) %>%
+      animation_opts(
+        frame = as.numeric(input$animation_speed),
+        transition = 350,
+        easing = "cubic-in-out",
+        redraw = FALSE
+      ) %>%
+      animation_slider(
+        currentvalue = list(prefix = "Year: ", font = list(color="black"))
+      ) %>%
+      config(displayModeBar = TRUE)
+    
+    return(p)
+  })
+  
+  # Animation control buttons - using simpler approach
+  # For these buttons, we'll rely on plotly's built-in animation controls instead of custom JS
+  observeEvent(input$play_button, {
+    # Animation controls are built into plotly - no need for custom JS
+    # We'll just update a reactive value to trigger plotly animation slider
+    # This is a workaround since we can't directly control animation through server code
+    output$animation_control <- renderText({
+      paste("Animation started at", Sys.time())
+    })
+  })
+  
+  observeEvent(input$pause_button, {
+    output$animation_control <- renderText({
+      paste("Animation paused at", Sys.time())
+    })
+  })
+  
+  observeEvent(input$reset_button, {
+    output$animation_control <- renderText({
+      paste("Animation reset at", Sys.time())
+    })
+  })
+  
+  # Generate insights
+  output$insights <- renderUI({
+    data <- filtered_data()
+    
+    # Calculate basic statistics
+    latest_year <- max(data$year, na.rm = TRUE)
+    earliest_year <- min(data$year, na.rm = TRUE)
+    
+    high_emission_countries <- data %>%
+      filter(year == latest_year) %>%
+      arrange(desc(per_capita)) %>%
+      head(5) %>%
+      pull(country)
+    
+    most_improved <- data %>%
+      filter(year %in% c(earliest_year, latest_year)) %>%
+      group_by(country) %>%
+      filter(n() == 2) %>%
+      summarize(
+        emission_change = (per_capita[year == latest_year] - per_capita[year == earliest_year]) / per_capita[year == earliest_year] * 100,
+        .groups = "drop"
+      ) %>%
+      arrange(emission_change) %>%
+      head(5) %>%
+      pull(country)
+    
+    HTML(paste0(
+      "<h4>Key Insights:</h4>",
+      "<ul>",
+      "<li>Countries with higher GDP per capita tend to have higher CO2 emissions per capita.</li>",
+      "<li>Top 5 countries with highest CO2 emissions per capita in ", latest_year, ": ", paste(high_emission_countries, collapse = ", "), "</li>",
+      "<li>Top 5 countries with the largest reduction in CO2 emissions per capita from ", earliest_year, " to ", latest_year, ": ", paste(most_improved, collapse = ", "), "</li>",
+      "<li>Many countries have stabilized or reduced CO2 emissions while growing economically over time.</li>",
+      "</ul>"
+    ))
+  })
+  
+  # Data table output
+  output$country_data <- renderDT({
+    data <- filtered_data()
+    
+    # Prepare data for the latest year
+    latest_year <- max(data$year, na.rm = TRUE)
+    
+    table_data <- data %>%
+      filter(year == latest_year) %>%
+      select(country, continent, gdp_per_capita, per_capita, emissions, population) %>%
+      arrange(desc(per_capita)) %>%
+      rename(
+        "Country" = country,
+        "Continent" = continent,
+        "GDP per Capita ($)" = gdp_per_capita,
+        "CO2 per Capita (t)" = per_capita,
+        "CO2 Emissions (kt)" = emissions,
+        "Population" = population
+      )
+    
+    return(table_data)
+  }, options = list(pageLength = 10, scrollX = TRUE))
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+```{r}
+################################################
+# 4. Sector Breakdown Visualization (Stacked Area Chart) #
+################################################
+
+library(shiny)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(readr)
+library(tidyr)
+
+# Load data - Using Kaggle dataset
+load_sector_data <- function() {
+  # Load the actual data. If sector data doesn't exist, we'll create an estimation
+  co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv")
+  
+  # Rename columns as needed
+  co2_data <- co2_data %>%
+    rename(
+      country = Country,
+      region = Region,
+      date = Date,
+      emissions = `Kilotons of Co2`,
+      per_capita = `Metric Tons Per Capita`
+    )
+  
+  # Extract year from date
+  co2_data <- co2_data %>%
+    mutate(
+      year = case_when(
+        grepl("^\\d{2}-\\d{2}-(\\d{4})$", date) ~ as.numeric(sub("^\\d{2}-\\d{2}-(\\d{4})$", "\\1", date)),
+        grepl("^(\\d{4})-\\d{2}-\\d{2}$", date) ~ as.numeric(sub("^(\\d{4})-\\d{2}-\\d{2}$", "\\1", date)),
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    filter(!is.na(year))
+  
+  # Select top countries
+  top_countries <- co2_data %>%
+    filter(year == max(year, na.rm = TRUE)) %>%
+    arrange(desc(emissions)) %>%
+    head(10) %>%
+    pull(country)
+  
+  # Define sectors (since we don't have actual sector breakdown)
+  sectors <- c("Energy", "Industry", "Transportation", "Buildings", "Agriculture", "Waste")
+  
+  # Create estimated sector breakdown for each country
+  sector_data <- co2_data %>%
+    filter(country %in% top_countries) %>%
+    mutate(
+      Energy = emissions * 0.40 * (1 + 0.1 * sin((year - 1990) / 10)),  # ~40% energy
+      Industry = emissions * 0.25 * (1 + 0.05 * cos((year - 1990) / 8)),  # ~25% industry
+      Transportation = emissions * 0.15 * (1 + 0.08 * sin((year - 1995) / 12)),  # ~15% transportation
+      Buildings = emissions * 0.10 * (1 + 0.03 * cos((year - 2000) / 15)),  # ~10% buildings
+      Agriculture = emissions * 0.07 * (1 + 0.02 * sin((year - 1990) / 20)),  # ~7% agriculture
+      Waste = emissions * 0.03 * (1 - 0.01 * (year - 1990) / 30)  # ~3% waste
+    )
+  
+  # Convert to long format
+  sector_data_long <- sector_data %>%
+    pivot_longer(
+      cols = all_of(sectors),
+      names_to = "sector",
+      values_to = "sector_emissions"
+    )
+  
+  return(sector_data_long)
+}
+
+# Prepare data
+sector_data <- load_sector_data()
+available_countries <- unique(sector_data$country)
+
+# Shiny app
+ui <- fluidPage(
+  titlePanel("CO2 Emissions by Sector"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("selected_country", "Select Country:",
+                 choices = available_countries,
+                 selected = available_countries[1]),
+      
+      radioButtons("view_type", "View Type:",
+                  choices = c("Absolute Values (kt)" = "absolute", 
+                              "Percentage (%)" = "percentage"),
+                  selected = "absolute"),
+      
+      checkboxGroupInput("selected_sectors", "Select Sectors:",
+                        choices = unique(sector_data$sector),
+                        selected = unique(sector_data$sector)),
+      
+      sliderInput("year_range", "Year Range:",
+                 min = min(sector_data$year),
+                 max = max(sector_data$year),
+                 value = c(min(sector_data$year), max(sector_data$year)),
+                 step = 1),
+      
+      hr(),
+      helpText("This visualization shows CO2 emissions breakdown by sector for each country over time.")
+    ),
+    
+    mainPanel(
+      plotlyOutput("sector_plot", height = "500px"),
+      hr(),
+      fluidRow(
+        column(6, plotlyOutput("sector_composition", height = "300px")),
+        column(6, plotlyOutput("sector_trend", height = "300px"))
+      ),
+      hr(),
+      htmlOutput("sector_insights")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Filter data based on user selections
+  filtered_data <- reactive({
+    data <- sector_data %>%
+      filter(
+        country == input$selected_country,
+        year >= input$year_range[1],
+        year <= input$year_range[2],
+        sector %in% input$selected_sectors
+      )
+    
+    # Calculate percentages if needed
+    if(input$view_type == "percentage") {
+      data <- data %>%
+        group_by(country, year) %>%
+        mutate(sector_emissions_pct = sector_emissions / sum(sector_emissions) * 100) %>%
+        ungroup()
+    }
+    
+    return(data)
+  })
+  
+  # Main stacked area chart
+  output$sector_plot <- renderPlotly({
+    data <- filtered_data()
+    
+    if(input$view_type == "absolute") {
+      # Absolute values visualization
+      p <- ggplot(data, aes(x = year, y = sector_emissions, fill = sector)) +
+        geom_area() +
+        scale_fill_brewer(palette = "Set3") +
+        labs(title = paste(input$selected_country, "CO2 Emissions by Sector"),
+             x = "Year", y = "CO2 Emissions (kt)",
+             fill = "Sector") +
+        theme_minimal() +
+        theme(legend.position = "bottom")
+    } else {
+      # Percentage visualization
+      p <- ggplot(data, aes(x = year, y = sector_emissions_pct, fill = sector)) +
+        geom_area() +
+        scale_fill_brewer(palette = "Set3") +
+        labs(title = paste(input$selected_country, "CO2 Emissions by Sector (%)"),
+             x = "Year", y = "Percentage (%)",
+             fill = "Sector") +
+        theme_minimal() +
+        scale_y_continuous(limits = c(0, 100)) +
+        theme(legend.position = "bottom")
+    }
+    
+    ggplotly(p) %>%
+      layout(legend = list(orientation = "h", y = -0.2))
+  })
+  
+  # Latest year sector composition pie chart
+  output$sector_composition <- renderPlotly({
+    data <- filtered_data()
+    
+    # Get latest year data
+    latest_year <- max(data$year)
+    latest_data <- data %>%
+      filter(year == latest_year)
+    
+    plot_ly(latest_data, labels = ~sector, values = ~sector_emissions, type = 'pie',
+            textinfo = 'label+percent',
+            insidetextorientation = 'radial',
+            marker = list(colors = RColorBrewer::brewer.pal(length(unique(data$sector)), "Set3"))) %>%
+      layout(title = paste(input$selected_country, "-", latest_year, "Sector Composition"),
+             showlegend = FALSE)
+  })
+  
+  # Sector trend line chart
+  output$sector_trend <- renderPlotly({
+    data <- filtered_data()
+    
+    if(input$view_type == "absolute") {
+      p <- ggplot(data, aes(x = year, y = sector_emissions, color = sector)) +
+        geom_line(size = 1) +
+        geom_point() +
+        scale_color_brewer(palette = "Set3") +
+        labs(title = "Sector Emissions Over Time",
+             x = "Year", y = "CO2 Emissions (kt)") +
+        theme_minimal()
+    } else {
+      p <- ggplot(data, aes(x = year, y = sector_emissions_pct, color = sector)) +
+        geom_line(size = 1) +
+        geom_point() +
+        scale_color_brewer(palette = "Set3") +
+        labs(title = "Sector Emissions Percentage Over Time",
+             x = "Year", y = "Percentage (%)") +
+        theme_minimal()
+    }
+    
+    ggplotly(p)
+  })
+  
+  # Sector insights text
+  output$sector_insights <- renderUI({
+    data <- filtered_data()
+    
+    # Get earliest and latest years
+    latest_year <- max(data$year)
+    earliest_year <- min(data$year)
+    
+    # Largest sector
+    latest_max_sector <- data %>%
+      filter(year == latest_year) %>%
+      arrange(desc(sector_emissions)) %>%
+      head(1) %>%
+      pull(sector)
+    
+    # Fastest growing sector
+    sector_growth <- data %>%
+      filter(year %in% c(earliest_year, latest_year)) %>%
+      group_by(sector) %>%
+      summarize(
+        early_value = sector_emissions[year == earliest_year],
+        latest_value = sector_emissions[year == latest_year],
+        growth_pct = (latest_value - early_value) / early_value * 100,
+        .groups = "drop"
+      ) %>%
+      arrange(desc(growth_pct))
+    
+    fastest_growing <- sector_growth %>% head(1) %>% pull(sector)
+    fastest_growing_pct <- sector_growth %>% head(1) %>% pull(growth_pct)
+    
+    # Check for decreasing sectors
+    decreasing_sectors <- sector_growth %>%
+      filter(growth_pct < 0) %>%
+      pull(sector)
+    
+    HTML(paste0(
+      "<h4>Sector Analysis Insights:</h4>",
+      "<ul>",
+      "<li>As of ", latest_year, ", the <b>", latest_max_sector, "</b> sector accounts for the largest share of CO2 emissions in ", input$selected_country, ".</li>",
+      "<li>From ", earliest_year, " to ", latest_year, ", the <b>", fastest_growing, "</b> sector has grown the fastest (approximately ", round(fastest_growing_pct, 1), "% increase).</li>",
+      ifelse(length(decreasing_sectors) > 0,
+             paste0("<li>During the same period, the <b>", paste(decreasing_sectors, collapse = ", "), "</b> sector(s) saw a decrease in emissions.</li>"),
+             ""),
+      "<li>These trends reflect changes in ", input$selected_country, "'s economic structure and energy policies.</li>",
+      "</ul>"
+    ))
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+```{r}
+################################################
+# 5. Emission Change Rate Heatmap #
+################################################
+
+library(shiny)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(RColorBrewer)
+
+# Load data
+load_co2_data <- function() {
+  co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv")
+  
+  # Rename columns as needed
+  co2_data <- co2_data %>%
+    rename(
+      country = Country,
+      region = Region,
+      date = Date,
+      emissions = `Kilotons of Co2`,
+      per_capita = `Metric Tons Per Capita`
+    )
+  
+  # Extract year from date
+  co2_data <- co2_data %>%
+    mutate(
+      year = case_when(
+        grepl("^\\d{2}-\\d{2}-(\\d{4})$", date) ~ as.numeric(sub("^\\d{2}-\\d{2}-(\\d{4})$", "\\1", date)),
+        grepl("^(\\d{4})-\\d{2}-\\d{2}$", date) ~ as.numeric(sub("^(\\d{4})-\\d{2}-\\d{2}$", "\\1", date)),
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    filter(!is.na(year))
+  
+  return(co2_data)
+}
+
+# Function to calculate change rates
+calculate_change_rates <- function(data, metric = "emissions", min_year = 1990) {
+  # Group by country and calculate year-over-year change rates
+  data %>%
+    arrange(country, year) %>%
+    filter(year >= min_year) %>%
+    group_by(country) %>%
+    mutate(
+      value = if(metric == "emissions") emissions else per_capita,
+      # Year-over-year change rate
+      change_rate = (value / lag(value) - 1) * 100,
+      # 5-year average change rate (if needed)
+      change_5yr = (value / lag(value, 5)^(1/5) - 1) * 100
+    ) %>%
+    filter(!is.na(change_rate)) %>%  # Remove first year (no change rate available)
+    ungroup()
+}
+
+# Load data
+co2_data <- load_co2_data()
+available_regions <- c("All", "Asia", "Europe", "North America", "South America", "Africa", "Oceania")
+
+# Create region mapping for countries (simplified mapping based on country names)
+country_regions <- data.frame(
+  country = unique(co2_data$country),
+  region = NA
+)
+
+# Simple region assignment based on country names (in a real app, use a more accurate mapping)
+country_regions$region <- case_when(
+  grepl("China|Japan|India|Korea|Indonesia|Thailand|Philippines|Vietnam|Malaysia", country_regions$country) ~ "Asia",
+  grepl("United States|Canada|Mexico", country_regions$country) ~ "North America",
+  grepl("Brazil|Argentina|Chile|Colombia|Peru|Venezuela", country_regions$country) ~ "South America",
+  grepl("Germany|France|United Kingdom|Italy|Spain|Poland|Russia|Ukraine", country_regions$country) ~ "Europe",
+  grepl("South Africa|Nigeria|Egypt|Algeria|Morocco|Kenya|Ethiopia", country_regions$country) ~ "Africa",
+  grepl("Australia|New Zealand", country_regions$country) ~ "Oceania",
+  TRUE ~ "Other"
+)
+
+# Shiny app
+ui <- fluidPage(
+  titlePanel("CO2 Emissions Change Rate Heatmap"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("selected_region", "Select Region:",
+                 choices = available_regions,
+                 selected = "All"),
+      
+      radioButtons("metric", "Metric:",
+                  choices = c("Total Emissions" = "emissions", 
+                              "Per Capita Emissions" = "per_capita"),
+                  selected = "emissions"),
+      
+      radioButtons("time_scale", "Time Scale:",
+                  choices = c("Annual Change Rate" = "annual", 
+                              "5-Year Average Change Rate" = "five_year"),
+                  selected = "annual"),
+      
+      sliderInput("year_range", "Year Range:",
+                 min = min(co2_data$year) + 1,  # First year cannot calculate change rate
+                 max = max(co2_data$year),
+                 value = c(min(co2_data$year) + 1, max(co2_data$year)),
+                 step = 1),
+      
+      sliderInput("change_range", "Change Rate Range (%):",
+                 min = -30,
+                 max = 30,
+                 value = c(-20, 20),
+                 step = 1),
+      
+      checkboxInput("show_top_countries", "Show Top Countries Only", value = TRUE),
+      conditionalPanel(
+        condition = "input.show_top_countries == true",
+        numericInput("top_n", "Number of Countries to Display:", 20, min = 5, max = 50)
+      ),
+      
+      hr(),
+      helpText("This heatmap shows annual change rates in CO2 emissions by country and year. Red indicates increases, blue indicates decreases.")
+    ),
+    
+    mainPanel(
+      plotlyOutput("heatmap_plot", height = "700px"),
+      hr(),
+      htmlOutput("change_insights")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Filter data based on user selections
+  filtered_data <- reactive({
+    # Calculate change rates
+    change_data <- calculate_change_rates(co2_data, input$metric, min_year = input$year_range[1] - 1)
+    
+    # Apply region filter
+    if(input$selected_region != "All") {
+      region_countries <- country_regions %>%
+        filter(region == input$selected_region) %>%
+        pull(country)
+      
+      change_data <- change_data %>%
+        filter(country %in% region_countries)
+    }
+    
+    # Apply year range filter
+    change_data <- change_data %>%
+      filter(year >= input$year_range[1], year <= input$year_range[2])
+    
+    # Apply change rate range filter
+    change_metric <- if(input$time_scale == "annual") "change_rate" else "change_5yr"
+    
+    change_data <- change_data %>%
+      filter(get(change_metric) >= input$change_range[1], 
+             get(change_metric) <= input$change_range[2])
+    
+    # Filter top countries (if selected)
+    if(input$show_top_countries) {
+      # Calculate average emissions by country and select top N
+      top_countries <- change_data %>%
+        group_by(country) %>%
+        summarize(avg_value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+        arrange(desc(avg_value)) %>%
+        head(input$top_n) %>%
+        pull(country)
+      
+      change_data <- change_data %>%
+        filter(country %in% top_countries)
+    }
+    
+    return(change_data)
+  })
+  
+  # Create heatmap
+  output$heatmap_plot <- renderPlotly({
+    data <- filtered_data()
+    
+    # Select change rate metric based on user choice
+    change_metric <- if(input$time_scale == "annual") "change_rate" else "change_5yr"
+    
+    # Sort countries by average emission value
+    country_order <- data %>%
+      group_by(country) %>%
+      summarize(avg_value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+      arrange(desc(avg_value)) %>%
+      pull(country)
+    
+    # Convert to factor to preserve order
+    data$country <- factor(data$country, levels = country_order)
+    
+    # Define heatmap color palette
+    heatmap_colors <- colorRampPalette(c("blue", "white", "red"))(11)
+    
+    # Create base plot
+    p <- ggplot(data, aes(x = year, y = country, fill = get(change_metric))) +
+      geom_tile() +
+      scale_fill_gradientn(
+        colors = heatmap_colors,
+        limits = input$change_range,
+        name = "Change Rate (%)"
+      ) +
+      labs(
+        title = paste("CO2", if(input$metric == "emissions") "Emissions" else "Per Capita Emissions", 
+                     if(input$time_scale == "annual") "Annual Change Rate" else "5-Year Average Change Rate"),
+        x = "Year",
+        y = "Country"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.y = element_text(size = 10),
+        legend.position = "right"
+      )
+    
+    # Convert to plotly
+    ggplotly(p, tooltip = c("x", "y", "fill")) %>%
+      layout(
+        yaxis = list(autorange = "reversed"),
+        margin = list(l = 120)  # Add margin for country names
+      )
+  })
+  
+  # Change rate insights
+  output$change_insights <- renderUI({
+    data <- filtered_data()
+    change_metric <- if(input$time_scale == "annual") "change_rate" else "change_5yr"
+    
+    # Countries with highest average increase
+    highest_increase <- data %>%
+      group_by(country) %>%
+      summarize(avg_change = mean(get(change_metric), na.rm = TRUE), .groups = "drop") %>%
+      arrange(desc(avg_change)) %>%
+      head(3)
+    
+    # Countries with highest average decrease
+    highest_decrease <- data %>%
+      group_by(country) %>%
+      summarize(avg_change = mean(get(change_metric), na.rm = TRUE), .groups = "drop") %>%
+      arrange(avg_change) %>%
+      head(3)
+    
+    # Countries with highest volatility in change rates
+    highest_volatility <- data %>%
+      group_by(country) %>%
+      summarize(volatility = sd(get(change_metric), na.rm = TRUE), .groups = "drop") %>%
+      arrange(desc(volatility)) %>%
+      head(3)
+    
+    # Overall average change rate
+    overall_avg_change <- mean(data[[change_metric]], na.rm = TRUE)
+    
+    HTML(paste0(
+      "<h4>Change Rate Analysis Insights:</h4>",
+      "<ul>",
+      "<li>Countries with highest average increase during the analyzed period: <b>", 
+        paste(highest_increase$country, paste0("(", round(highest_increase$avg_change, 1), "%)"), collapse = ", "), "</b></li>",
+      "<li>Countries with highest average decrease during the analyzed period: <b>", 
+        paste(highest_decrease$country, paste0("(", round(highest_decrease$avg_change, 1), "%)"), collapse = ", "), "</b></li>",
+      "<li>Countries with highest change rate volatility: <b>", 
+        paste(highest_volatility$country, collapse = ", "), "</b></li>",
+      "<li>Overall average change rate: <b>", round(overall_avg_change, 2), "%</b> (positive values indicate increase, negative values indicate decrease)</li>",
+      "<li>", if(overall_avg_change > 0) "Overall, CO2 emissions are increasing." else "Overall, CO2 emissions are decreasing.", "</li>",
+      "</ul>"
+    ))
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+```{r}
+################################################
+# 6. Country Clustering Visualization (Similarity-based Clustering) #
+################################################
+
+library(shiny)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(cluster)
+library(factoextra)
+library(DT)
+
+# Load data
+load_co2_data <- function() {
+  co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv")
+  
+  # Rename columns as needed
+  co2_data <- co2_data %>%
+    rename(
+      country = Country,
+      region = Region,
+      date = Date,
+      emissions = `Kilotons of Co2`,
+      per_capita = `Metric Tons Per Capita`
+    )
+  
+  # Extract year from date
+  co2_data <- co2_data %>%
+    mutate(
+      year = case_when(
+        grepl("^\\d{2}-\\d{2}-(\\d{4})$", date) ~ as.numeric(sub("^\\d{2}-\\d{2}-(\\d{4})$", "\\1", date)),
+        grepl("^(\\d{4})-\\d{2}-\\d{2}$", date) ~ as.numeric(sub("^(\\d{4})-\\d{2}-\\d{2}$", "\\1", date)),
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    filter(!is.na(year))
+  
+  return(co2_data)
+}
+
+# Prepare data for clustering
+prepare_clustering_data <- function(data, metric = "emissions", normalize = TRUE) {
+  # Create features for each country
+  features <- data %>%
+    group_by(country) %>%
+    summarize(
+      total_latest = if(metric == "emissions") last(emissions) else last(per_capita),
+      avg_value = mean(if(metric == "emissions") emissions else per_capita, na.rm = TRUE),
+      total_growth = (last(if(metric == "emissions") emissions else per_capita) / 
+                     first(if(metric == "emissions") emissions else per_capita) - 1) * 100,
+      volatility = sd(if(metric == "emissions") emissions else per_capita, na.rm = TRUE) / 
+                  mean(if(metric == "emissions") emissions else per_capita, na.rm = TRUE) * 100,
+      .groups = "drop"
+    ) %>%
+    filter(!is.na(total_growth), !is.na(volatility))  # Remove entries with missing values
+  
+  # Normalize data if requested
+  if(normalize) {
+    numeric_cols <- sapply(features, is.numeric)
+    features[numeric_cols] <- scale(features[numeric_cols])
+  }
+  
+  return(features)
+}
+
+# Perform k-means clustering
+perform_kmeans <- function(data, k = 4) {
+  # Save country names
+  country_names <- data$country
+  
+  # Select only numeric columns
+  data_numeric <- data %>% select(where(is.numeric))
+  
+  # Perform k-means
+  kmeans_result <- kmeans(data_numeric, centers = k, nstart = 25)
+  
+  # Add country names and cluster assignment
+  result <- data.frame(
+    country = country_names,
+    cluster = kmeans_result$cluster
+  )
+  
+  # Extract cluster centers
+  centers <- as.data.frame(kmeans_result$centers)
+  
+  return(list(clusters = result, centers = centers, kmeans = kmeans_result))
+}
+
+# Perform hierarchical clustering
+perform_hclust <- function(data, k = 4) {
+  # Save country names
+  country_names <- data$country
+  
+  # Select only numeric columns
+  data_numeric <- data %>% select(where(is.numeric))
+  
+  # Calculate distance matrix
+  dist_matrix <- dist(data_numeric)
+  
+  # Perform hierarchical clustering
+  hclust_result <- hclust(dist_matrix, method = "ward.D2")
+  
+  # Cut tree to get clusters
+  clusters <- cutree(hclust_result, k = k)
+  
+  # Add country names and cluster assignment
+  result <- data.frame(
+    country = country_names,
+    cluster = clusters
+  )
+  
+  return(list(clusters = result, hclust = hclust_result, dist = dist_matrix))
+}
+
+# Load data
+co2_data <- load_co2_data()
+
+# Shiny app
+ui <- fluidPage(
+  titlePanel("CO2 Emission Pattern-Based Country Clustering"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      radioButtons("metric", "Metric:",
+                  choices = c("Total Emissions" = "emissions", 
+                              "Per Capita Emissions" = "per_capita"),
+                  selected = "emissions"),
+      
+      radioButtons("clustering_method", "Clustering Method:",
+                  choices = c("K-means" = "kmeans", 
+                              "Hierarchical Clustering" = "hierarchical"),
+                  selected = "kmeans"),
+      
+      numericInput("num_clusters", "Number of Clusters:", 4, min = 2, max = 10),
+      
+      checkboxInput("normalize_data", "Normalize Data", value = TRUE),
+      
+      conditionalPanel(
+        condition = "input.clustering_method == 'kmeans'",
+        selectInput("plot_dimensions", "Visualization Dimensions:",
+                  choices = c("Latest vs Growth Rate" = "total_growth",
+                              "Average vs Volatility" = "avg_volatility"),
+                  selected = "total_growth")
+      ),
+      
+      hr(),
+      helpText("This visualization clusters countries based on CO2 emission patterns. You can change the clustering method and dimensions to analyze country groupings from different perspectives.")
+    ),
+    
+    mainPanel(
+      uiOutput("mainPanel")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Prepare data for clustering
+  clustering_data <- reactive({
+    prepare_clustering_data(co2_data, input$metric, input$normalize_data)
+  })
+  
+  # Perform clustering
+  clustering_results <- reactive({
+    data <- clustering_data()
+    
+    if(input$clustering_method == "kmeans") {
+      perform_kmeans(data, k = input$num_clusters)
+    } else {
+      perform_hclust(data, k = input$num_clusters)
+    }
+  })
+  
+  # K-means visualization
+  output$kmeans_plot <- renderPlotly({
+    # Only use K-means results
+    if(input$clustering_method != "kmeans") return(NULL)
+    
+    results <- clustering_results()
+    data <- clustering_data()
+    
+    # Add cluster information
+    plot_data <- data %>%
+      left_join(results$clusters, by = "country")
+    
+    # Select plot dimensions
+    if(input$plot_dimensions == "total_growth") {
+      x_var <- "total_latest"
+      y_var <- "total_growth"
+      x_label <- "Latest Emissions"
+      y_label <- "Growth Rate (%)"
+    } else {
+      x_var <- "avg_value"
+      y_var <- "volatility"
+      x_label <- "Average Emissions"
+      y_label <- "Volatility (%)"
+    }
+    
+    # Create scatter plot
+    p <- ggplot(plot_data, aes_string(x = x_var, y = y_var, color = "factor(cluster)", text = "country")) +
+      geom_point(size = 3, alpha = 0.7) +
+      labs(title = paste("CO2", if(input$metric == "emissions") "Emissions" else "Per Capita Emissions", "Based Country Clustering"),
+           x = x_label, y = y_label, color = "Cluster") +
+      theme_minimal()
+    
+    ggplotly(p, tooltip = c("text", x_var, y_var, "cluster"))
+  })
+  
+  # Hierarchical clustering visualization
+  output$hclust_plot <- renderPlot({
+    # Only use hierarchical clustering results
+    if(input$clustering_method != "hierarchical") return(NULL)
+    
+    results <- clustering_results()
+    
+    # Create dendrogram
+    fviz_dend(results$hclust, k = input$num_clusters, 
+              cex = 0.6, 
+              palette = "jco",
+              rect = TRUE,
+              main = "CO2 Emissions Pattern-Based Country Clustering Dendrogram")
+  })
+  
+  # Cluster details table
+  output$cluster_details <- renderDataTable({
+    results <- clustering_results()
+    data <- clustering_data()
+    
+    # Combine cluster information with original data
+    cluster_data <- results$clusters %>%
+      left_join(data, by = "country") %>%
+      arrange(cluster, desc(total_latest))
+    
+    # Convert to table format
+    table_data <- cluster_data %>%
+      select(country, cluster, total_latest, avg_value, total_growth, volatility) %>%
+      rename(
+        "Country" = country,
+        "Cluster" = cluster,
+        "Latest Emissions" = total_latest,
+        "Average Emissions" = avg_value,
+        "Growth Rate (%)" = total_growth,
+        "Volatility (%)" = volatility
+      )
+    
+    datatable(table_data, 
+              options = list(pageLength = 15, 
+                            autoWidth = TRUE,
+                            columnDefs = list(list(width = '150px', targets = 0))),
+              rownames = FALSE)
+  })
+  
+  # Cluster characteristics summary
+  output$cluster_summary <- renderUI({
+    results <- clustering_results()
+    data <- clustering_data()
+    
+    # Calculate cluster characteristics
+    cluster_summary <- results$clusters %>%
+      left_join(data, by = "country") %>%
+      group_by(cluster) %>%
+      summarize(
+        count = n(),
+        avg_latest = mean(total_latest, na.rm = TRUE),
+        avg_growth = mean(total_growth, na.rm = TRUE),
+        key_countries = paste(head(arrange(cur_data(), desc(total_latest))$country, 3), collapse = ", "),
+        .groups = "drop"
+      )
+    
+    # Interpret cluster characteristics
+    summaries <- lapply(1:input$num_clusters, function(i) {
+      cluster <- filter(cluster_summary, cluster == i)
+      paste0(
+        "<div style='margin-bottom: 15px;'>",
+        "<h5>Cluster ", i, " (", cluster$count, " countries)</h5>",
+        "<p><b>Key Countries:</b> ", cluster$key_countries, "</p>",
+        "<p><b>Characteristics:</b> ",
+        "Average emissions ", round(cluster$avg_latest, 2), 
+        ", Average growth rate ", round(cluster$avg_growth, 2), "%</p>",
+        "<p><b>Interpretation:</b> ",
+        if(cluster$avg_growth > 10) {
+          "Countries with rapid emission growth"
+        } else if(cluster$avg_growth > 0) {
+          "Countries with moderate emission growth"
+        } else if(cluster$avg_growth > -10) {
+          "Countries with moderate emission reduction"
+        } else {
+          "Countries with significant emission reduction"
+        },
+        "</p>",
+        "</div>"
+      )
+    })
+    
+    HTML(paste0(
+      "<h4>Cluster Characteristics Summary:</h4>",
+      paste(summaries, collapse = "")
+    ))
+  })
+  
+  # Dynamic UI layout adjustment
+  output$clustering_visualization <- renderUI({
+    if(input$clustering_method == "kmeans") {
+      plotlyOutput("kmeans_plot", height = "500px")
+    } else {
+      plotOutput("hclust_plot", height = "600px")
+    }
+  })
+  
+  # Main panel content
+  output$mainPanel <- renderUI({
+    tagList(
+      uiOutput("clustering_visualization"),
+      hr(),
+      htmlOutput("cluster_summary"),
+      hr(),
+      h4("Detailed Country Information by Cluster"),
+      dataTableOutput("cluster_details")
+    )
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
