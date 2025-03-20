@@ -1,0 +1,424 @@
+---
+title: "Project Milestone 2"
+output: html_document
+author: "Max, Anirudh, Tanmay, Giancarlo, Jihong (Group 18)"
+date: "`r Sys.Date()`"
+runtime: shiny
+---
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+```{r}
+library(tidyverse)
+library(shiny)
+library(shiny)
+library(leaflet)
+library(RColorBrewer)
+library(scales)
+library(dplyr)
+library(readr)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(DT)
+
+```
+
+[Data from Carbon (CO2) Emissions by Ravender Singh Rana on Kaggle](https://www.kaggle.com/datasets/ravindrasinghrana/carbon-co2-emissions?select=Carbon_%28CO2%29_Emissions_by_Country.csv)
+
+# Visualization 1 - Shiny Heatmap
+
+### Code
+
+```{r Visualization 1, eval = FALSE}
+ui <- fluidPage(
+
+
+    titlePanel("Kilotons of Co2 per Region"),
+
+
+    sidebarLayout(
+        sidebarPanel(
+            sliderInput("Year",
+                        "Year",
+                        min = 1990,
+                        max = 2019,
+                        value = c(1990,2019),
+                        sep = ""),
+            checkboxGroupInput('Region','Region',c('Africa','Americas','Asia','Europe','Oceania'),
+                               selected = c('Africa','Americas','Asia','Europe','Oceania'))
+        ),
+
+
+        mainPanel(
+           plotOutput("heat"),
+           tableOutput('table')
+        )
+    )
+)
+
+
+server <- function(input, output) {
+  
+  data = read_csv('~/Desktop/Classes /stat436_s25/data/carbon.csv') %>% 
+    mutate(Year = strtoi(substring(Date, 7,10)))
+  
+  continent = data %>% 
+    group_by(Region, Year) %>% 
+    summarise(`Kilotons of CO2` = sum(`Kilotons of Co2`))
+  
+  outdata = reactive(continent %>% 
+                       filter(Year >= input$Year[1], Year <= input$Year[2], Region %in% input$Region))
+
+    output$heat <- renderPlot({
+      
+        
+      ggplot(outdata())+
+        geom_tile(aes(Year,Region, fill = `Kilotons of CO2`, col= `Kilotons of CO2`))+
+        scale_color_gradient2()+
+        scale_fill_gradient2()+
+        theme_minimal()+
+        theme(axis.text = element_text(color = 'black', size = 12), axis.title = element_text(size = 12))
+    })
+    
+    output$table = renderTable({outdata()})
+}
+
+
+shinyApp(ui, server)
+```
+
+[Online Hosted Shiny App](https://mrotblut.shinyapps.io/m2_vis1/)
+
+### Writeup
+
+We chose to implement the interactive heat map of kilotons of CO2 emissions by region to show how different regions of the world pollute the atmosphere. We chose to implement this visualization so users can see the increase in pollution over time and what regions of the world contribute to this the most. The implementation of this visualization has two filters, one to filter what years show up on the graph and table and one to select the regions you want to compare. By default, all data is shown is used. The heat map and data table are both filtered according to the users inputs. A trade-off that is made is the graph showing more precise data compared to the easily readable data that is shown. While a line graph would show more precise data that the heat map, the disparity in CO2 across regions would make it hard to compare the data, as some of the data in the regions with lower CO2 emissions would be squeezed together to show the data for the regions with higher CO2 emissions.
+
+# Visualization 2 - Line Graph
+
+### Code
+
+```{r}
+data = read_csv('~/Desktop/Classes /stat436_s25/data/carbon.csv') %>% 
+  mutate(Year = strtoi(substring(Date, 7,10)))
+
+summary = data %>% 
+  group_by(Region, Year) %>% 
+  summarise(`Metric Tons Per Capita` = mean(`Metric Tons Per Capita`))
+
+ggplot(summary)+
+  geom_line(aes(Year, `Metric Tons Per Capita`, col = Region))+
+  theme_bw()+
+  ggtitle('Average Metric Tons per Capita of CO2', subtitle = 'Seperated by Region')
+```
+
+### Writeup
+
+We decided to implement a line graph with the average metric tons per capita of CO2 in the Air for each region. This complements the previous graph with a comparison by region, but puts the data in the context of population. This visualization shows that while Asia is the highest polluter overall, for most of the data set Europe is the highest per capita polluter. The visualization is implemented using color to differentiate between the regions, using an average of each countries Metric Tons per Capita to form a statistic for the entire region. Something that is not included in the graph but could be misinterpreted by a user is that the population isn't included for these regions. A change in the graph doesn't necessarily correlated to a change in overall emissions but could correlate to a baby boom or a decrease in new births.
+
+# Visualization 3 -Choropleth Map
+
+### Code
+```{r}
+# Global variable to avoid jsonlite warnings
+country_name_field <- "name"
+
+# Load and preprocess data
+co2_data <- read_csv("~/Desktop/Classes /stat436_s25/data/carbon.csv") %>%
+  rename(
+    country = Country,                  # Standardize country column name
+    region = Region,                    # Standardize region column name
+    date = Date,                        # Standardize date column name
+    emissions = `Kilotons of Co2`,      # Standardize emissions column name
+    per_capita = `Metric Tons Per Capita` # Standardize per capita column name
+  ) %>%
+  # Extract year from date using regex
+  mutate(
+    year = case_when(
+      # Handle DD-MM-YYYY format
+      grepl("^\\d{2}-\\d{2}-(\\d{4})$", date) ~ as.numeric(sub("^\\d{2}-\\d{2}-(\\d{4})$", "\\1", date)),
+      # Handle YYYY-MM-DD format
+      grepl("^(\\d{4})-\\d{2}-\\d{2}$", date) ~ as.numeric(sub("^(\\d{4})-\\d{2}-\\d{2}$", "\\1", date)),
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  filter(!is.na(year))  # Remove data without year
+
+# Load world map data only once for memory efficiency
+world_map <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Define country name mappings as a list (to avoid jsonlite warnings)
+country_mapping_list <- list(
+  "United States of America" = "United States",
+  "United Kingdom" = "United Kingdom of Great Britain and Northern Ireland",
+  "Czech Republic" = "Czechia"
+)
+
+# Apply mapping using a loop instead of vectorized approach (prevents warnings)
+for (i in 1:length(country_mapping_list)) {
+  old_name <- names(country_mapping_list)[i]
+  new_name <- country_mapping_list[[i]]
+  world_map[[country_name_field]][world_map[[country_name_field]] == old_name] <- new_name
+}
+
+# Pre-calculate unique years for performance optimization
+unique_years <- sort(unique(co2_data$year))
+max_year <- max(unique_years)
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Global CO2 Emissions Map"),
+  sidebarLayout(
+    sidebarPanel(
+      # Year selection dropdown
+      selectInput("year", "Select Year:", 
+                choices = unique_years, 
+                selected = max_year),
+      
+      # View type radio buttons
+      radioButtons("view_type", "View Type:",
+                choices = list(
+                  "Total Emissions" = "total", 
+                  "Per Capita Emissions" = "per_capita"
+                )),
+      
+      hr(),
+      
+      # Quick navigation to major emitters using standard HTML select
+      selectInput(
+        "country_select",
+        "Quick Navigate to Top Emitters:",
+        choices = list("Select a country" = ""),  # Will be updated in server
+        selected = "",
+        selectize = FALSE,  # Use standard HTML select to avoid jsonlite warnings
+        size = 10,          # Show 10 items at once
+        width = "100%"
+      ),
+      
+      hr(),
+      
+      helpText("This map shows CO2 emissions by country. Select a year to see how emissions change over time.")
+    ),
+    mainPanel(
+      # Map output
+      leafletOutput("co2_map", height = "500px"),
+      div(style = "margin-top: 20px;"),
+      # Data table output
+      DTOutput("country_data")
+    )
+  )
+)
+
+# Define server
+server <- function(input, output, session) {
+  
+  # Reactive function to get filtered data for the selected year
+  getData <- reactive({
+    # Filter data for selected year
+    year_data <- co2_data %>% 
+      filter(year == input$year)
+    
+    # Create temporary variable for join
+    temp_data <- year_data
+    names(temp_data)[names(temp_data) == "country"] <- country_name_field
+    
+    # Merge with map data
+    left_join(world_map, temp_data, by = country_name_field)
+  })
+  
+  # Update country dropdown based on selected year and view type
+  observe({
+    data <- co2_data %>% 
+      filter(year == input$year) %>%
+      arrange(desc(if(input$view_type == "total") emissions else per_capita)) %>%
+      head(20)
+    
+    # Create a named list for choices (not vector) to avoid jsonlite warnings
+    country_list <- as.list(data$country)
+    names(country_list) <- data$country
+    
+    # Add "Select a country" option
+    choices_list <- c(list("Select a country" = ""), country_list)
+    
+    updateSelectInput(session, "country_select", 
+                     choices = choices_list,
+                     selected = "")
+  })
+  
+  # Create map with hover tooltips
+  output$co2_map <- renderLeaflet({
+    data <- getData()
+    
+    # Get palette for selected view type
+    if(input$view_type == "total") {
+      domain <- c(0, max(data$emissions, na.rm = TRUE))
+      pal <- colorNumeric(palette = "YlOrRd", domain = domain, na.color = "#CCCCCC")
+      title <- "CO2 Emissions (kt)"
+      valueCol <- "emissions"
+    } else {
+      domain <- c(0, max(data$per_capita, na.rm = TRUE))
+      pal <- colorNumeric(palette = "YlOrRd", domain = domain, na.color = "#CCCCCC")
+      title <- "CO2 Emissions per Capita (t)"
+      valueCol <- "per_capita"
+    }
+    
+    # Pre-compute colors to avoid jsonlite warnings with ~
+    if(input$view_type == "total") {
+      fillColors <- ifelse(is.na(data$emissions), "#CCCCCC", pal(data$emissions))
+    } else {
+      fillColors <- ifelse(is.na(data$per_capita), "#CCCCCC", pal(data$per_capita))
+    }
+    
+    # Pre-compute tooltip labels to avoid jsonlite warnings
+    tooltips <- vector("character", nrow(data))
+    
+    for(i in 1:nrow(data)) {
+      country <- data[[country_name_field]][i]
+      
+      if(input$view_type == "total") {
+        value <- data$emissions[i]
+        if(!is.na(value)) {
+          tooltips[i] <- paste0(
+            "<strong>", country, "</strong><br/>",
+            "CO2 Emissions: ", format(value, big.mark = ","), " kt"
+          )
+        } else {
+          tooltips[i] <- paste0("<strong>", country, "</strong><br/>No emission data")
+        }
+      } else {
+        value <- data$per_capita[i]
+        if(!is.na(value)) {
+          tooltips[i] <- paste0(
+            "<strong>", country, "</strong><br/>",
+            "CO2 per Capita: ", round(value, 2), " t/capita"
+          )
+        } else {
+          tooltips[i] <- paste0("<strong>", country, "</strong><br/>No emission data")
+        }
+      }
+    }
+    
+    # Create map
+    leaflet(data) %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addPolygons(
+        fillColor = fillColors,
+        weight = 1,
+        opacity = 1, 
+        color = "white",
+        dashArray = "3",
+        fillOpacity = 0.7,
+        highlight = highlightOptions(
+          weight = 2,
+          color = "#666",
+          dashArray = "",
+          fillOpacity = 0.7,
+          bringToFront = TRUE
+        ),
+        # Add HTML tooltips on hover
+        label = lapply(tooltips, HTML),
+        labelOptions = labelOptions(
+          style = list(
+            "font-family" = "Arial, sans-serif",
+            "font-size" = "12px",
+            "padding" = "6px 10px",
+            "background-color" = "white", 
+            "box-shadow" = "0 0 15px rgba(0,0,0,0.2)",
+            "border-radius" = "4px"
+          ),
+          direction = "auto",
+          offset = c(0, -5),
+          opacity = 0.9,
+          textsize = "12px"
+        )
+      ) %>%
+      addLegend(
+        position = "bottomright",
+        pal = pal,
+        values = data[[valueCol]],
+        title = title,
+        opacity = 0.7,
+        na.label = "No data",
+        labFormat = labelFormat(
+          prefix = "",
+          suffix = if(input$view_type == "total") " kt" else " t/capita"
+        )
+      )
+  })
+  
+  # Handle country selection and map zooming
+  observeEvent(input$country_select, {
+    if(input$country_select != "") {
+      # Find selected country in data
+      data <- getData()
+      country_data <- data[data[[country_name_field]] == input$country_select, ]
+      
+      if(nrow(country_data) > 0) {
+        # Simple bounds calculation with error handling
+        tryCatch({
+          # Calculate basic bounding box
+          bounds <- st_bbox(st_geometry(country_data))
+          
+          # Apply bounds with padding
+          leafletProxy("co2_map") %>%
+            fitBounds(
+              bounds[["xmin"]] - 1, bounds[["ymin"]] - 1,
+              bounds[["xmax"]] + 1, bounds[["ymax"]] + 1
+            )
+        }, error = function(e) {
+          # Fall back to a generic view if error
+          leafletProxy("co2_map") %>% 
+            setView(lng = 0, lat = 0, zoom = 2)
+        })
+      }
+    }
+  }, ignoreInit = TRUE)
+  
+  # Show data table with country emissions
+  output$country_data <- renderDT({
+    co2_data %>% 
+      filter(year == input$year) %>%
+      arrange(desc(if(input$view_type == "total") emissions else per_capita)) %>%
+      select(country, emissions, per_capita) %>%
+      rename("Country" = country, 
+             "CO2 Emissions (kt)" = emissions, 
+             "CO2 per Capita (t)" = per_capita)
+  }, options = list(pageLength = 10))
+}
+
+# Run app
+shinyApp(ui = ui, server = server)
+```
+
+
+### Writeup
+
+The Global CO2 Emissions Map illustrates critical disparities in carbon output across nations, revealing both major contributors and emission intensities by population. When viewed through total emissions, large economies like China and the United States clearly dominate global carbon production, highlighting the significant impact of industrial development and economy size on climate change. Switching to the per capita view transforms this narrative, often showing higher emission intensities in developed nations with smaller populations, suggesting that economic development patterns rather than population size alone drive carbon efficiency. This visualization contextualizes the complex interplay between economic growth, industrial structure, and environmental impact, allowing us to identify regions that have achieved lower emission intensities despite economic advancement—crucial insights for developing targeted climate policies and understanding which development models might offer more sustainable pathways forward.
+
+
+# Visualization 4
+
+### Code
+
+
+### Writeup
+
+
+
+# Visualization 5
+
+### Code
+
+
+### Writeup
+
+
+
+# Visualization 6
+
+### Code
+
+
+### Writeup
+
