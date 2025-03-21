@@ -1,6 +1,6 @@
-# app.R 파일로 저장할 독립 실행형 Shiny 앱 코드
+# Standalone Shiny app code to be saved as app.R
 
-# 필요한 라이브러리 로드
+# Load required libraries
 library(tidyverse) 
 library(shiny)
 library(leaflet)
@@ -14,7 +14,7 @@ library(DT)
 # Global variable to avoid jsonlite warnings
 country_name_field <- "name"
 
-# 데이터 로드 및 전처리
+# Load and preprocess data
 co2_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Data_Analysis/refs/heads/main/carbon.csv") %>%
   rename(
     country = Country,
@@ -32,28 +32,28 @@ co2_data <- read_csv("https://raw.githubusercontent.com/JIHONGKING/Data_Analysis
   ) %>%
   filter(!is.na(year))
 
-# 세계 지도 데이터 로드
+# Load world map data
 world_map <- ne_countries(scale = "medium", returnclass = "sf")
 
-# 국가명 매핑 정의
+# Define country name mappings
 country_mapping_list <- list(
   "United States of America" = "United States",
   "United Kingdom" = "United Kingdom of Great Britain and Northern Ireland",
   "Czech Republic" = "Czechia"
 )
 
-# 루프를 사용한 매핑 적용
+# Apply mapping using a loop
 for (i in 1:length(country_mapping_list)) {
   old_name <- names(country_mapping_list)[i]
   new_name <- country_mapping_list[[i]]
   world_map[[country_name_field]][world_map[[country_name_field]] == old_name] <- new_name
 }
 
-# 성능 최적화를 위한 연도 사전 계산
+# Pre-calculate unique years for performance optimization
 unique_years <- sort(unique(co2_data$year))
 max_year <- max(unique_years)
 
-# UI 정의
+# Define UI
 ui <- fluidPage(
   titlePanel("Global CO2 Emissions Map"),
   sidebarLayout(
@@ -92,7 +92,7 @@ ui <- fluidPage(
   )
 )
 
-# 서버 정의
+# Define server
 server <- function(input, output, session) {
   
   getData <- reactive({
@@ -249,5 +249,5 @@ server <- function(input, output, session) {
   }, options = list(pageLength = 10))
 }
 
-# 앱 실행
+# Run the app
 shinyApp(ui = ui, server = server)
