@@ -43,7 +43,7 @@ set.seed(42)
 
 # Read data (update path as needed)
 
-df <- read.csv("/Users/jihong/Desktop/Classes /stat436_s25/data/archive (1)/Reviews.csv", stringsAsFactors = FALSE)
+df <- read.csv("https://raw.githubusercontent.com/JIHONGKING/Data_Analysis/refs/heads/main/filtered_amazon_reviews.csv", stringsAsFactors = FALSE)
 
 # Clean and preprocess data
 df_clean <- df %>%
