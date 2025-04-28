@@ -1,0 +1,176 @@
+```{r}
+library(readr)
+
+x <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-07-07/coffee_ratings.csv")
+
+str(x)
+```
+
+
+```{r}
+library(readr)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+# Load data
+coffee <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-07-07/coffee_ratings.csv")
+
+# Data preprocessing
+coffee_clean <- coffee %>%
+  select(total_cup_points, aroma, country_of_origin, processing_method, altitude_mean_meters) %>%
+  filter(
+    !is.na(total_cup_points),
+    !is.na(aroma),
+    !is.na(country_of_origin),
+    !is.na(processing_method),
+    !is.na(altitude_mean_meters)
+  )
+
+# Create aroma levels
+coffee_clean <- coffee_clean %>%
+  mutate(
+    AromaLevel = case_when(
+      aroma <= 7.5 ~ "Low",
+      aroma <= 8.0 ~ "Medium",
+      TRUE ~ "High"
+    ),
+    AromaLevel = factor(AromaLevel, levels = c("Low", "Medium", "High"))
+  )
+
+# Select top countries
+top_countries <- names(sort(table(coffee_clean$country_of_origin), decreasing = TRUE)[1:7])
+coffee_clean <- coffee_clean %>%
+  mutate(
+    country_group = ifelse(country_of_origin %in% top_countries, 
+                          as.character(country_of_origin), "Other"),
+    country_group = factor(country_group)
+  )
+
+# Create decision tree model (using rpart)
+tree_model <- rpart(
+  AromaLevel ~ total_cup_points,
+  data = coffee_clean,
+  method = "class",
+  control = rpart.control(
+    minsplit = 30,
+    minbucket = 15,
+    maxdepth = 3,
+    cp = 0.01
+  )
+)
+
+# Plot the tree
+rpart.plot(
+  tree_model,
+  type = 4,
+  extra = 101,
+  fallen.leaves = TRUE,
+  branch = 0.5,
+  under = TRUE,
+  box.palette = "Blues",
+  main = "Coffee Aroma Level Classification Based on Cup Points",
+  cex.main = 1.2
+)
+
+# Save the plot
+png("coffee_decision_tree_rpart.png", width = 800, height = 600)
+rpart.plot(
+  tree_model,
+  type = 4,
+  extra = 101,
+  fallen.leaves = TRUE,
+  branch = 0.5,
+  under = TRUE,
+  box.palette = "Blues",
+  main = "Coffee Aroma Level Classification Based on Cup Points",
+  cex.main = 1.2
+)
+dev.off()
+
+# Model evaluation
+predictions <- predict(tree_model, coffee_clean, type = "class")
+confusion_matrix <- table(Predicted = predictions, Actual = coffee_clean$AromaLevel)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Model Accuracy:", round(accuracy * 100, 2), "%"))
+print(confusion_matrix)
+```
+
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(ggbeeswarm)
+library(readr)
+library(patchwork)  # Package for combining multiple plots in one display
+
+# Load coffee quality ratings dataset
+coffee <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-07-07/coffee_ratings.csv")
+
+# Data preprocessing: select relevant columns and remove missing values
+coffee_clean <- coffee %>%
+  select(total_cup_points, aroma, country_of_origin, processing_method, altitude_mean_meters) %>%
+  filter(
+    !is.na(total_cup_points),
+    !is.na(aroma),
+    !is.na(country_of_origin),
+    !is.na(processing_method),
+    !is.na(altitude_mean_meters)
+  )
+
+# Create aroma level categories based on score ranges
+coffee_clean <- coffee_clean %>%
+  mutate(
+    AromaLevel = case_when(
+      aroma <= 7.5 ~ "Low",
+      aroma <= 8.0 ~ "Medium",
+      TRUE ~ "High"
+    ),
+    AromaLevel = factor(AromaLevel, levels = c("Low", "Medium", "High"))
+  )
+
+# Filter dataset to include only two main processing methods for clearer comparison
+coffee_subset <- coffee_clean %>%
+  filter(processing_method %in% c("Natural / Dry", "Washed / Wet"))
+
+# Visualization comparison: Creating three different plots to demonstrate visualization techniques
+# 1a. Regular scatter plot (demonstrating the overplotting problem)
+p1 <- ggplot(coffee_subset, aes(x = processing_method, y = aroma)) +
+  geom_point(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Regular Scatter Plot",
+       subtitle = "Notice the overplotting problem",
+       x = "Processing Method",
+       y = "Aroma Score") +
+  theme(plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 8))
+
+# 1b. Jittered scatter plot (using random noise to reduce overplotting)
+p2 <- ggplot(coffee_subset, aes(x = processing_method, y = aroma)) +
+  geom_jitter(width = 0.2, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Jittered Scatter Plot",
+       subtitle = "Adds random noise to reduce overplotting",
+       x = "Processing Method",
+       y = "Aroma Score") +
+  theme(plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 8))
+
+# 1c. ggbeeswarm implementation (optimal point positioning algorithm)
+p3 <- ggplot(coffee_subset, aes(x = processing_method, y = aroma)) +
+  geom_quasirandom(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "ggbeeswarm: geom_quasirandom",
+       subtitle = "Optimal point positioning with no overlap",
+       x = "Processing Method",
+       y = "Aroma Score") +
+  theme(plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 8))
+
+# Combine all three plots side-by-side for direct comparison
+comparison_plot <- p1 + p2 + p3 + plot_layout(ncol = 3)
+comparison_plot
+
+```
