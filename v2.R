@@ -1,272 +1,108 @@
-
-library(plotly)
-# Load and preprocess data
-data = read_csv("https://raw.githubusercontent.com/JIHONGKING/Data_Analysis/refs/heads/main/carbon.csv") %>% 
-  mutate(Year = strtoi(substring(Date, 7,10)))
-
-# Summarize data by region and year
-summary = data %>% 
-  group_by(Region, Year) %>% 
-  summarise(`Metric Tons Per Capita` = mean(`Metric Tons Per Capita`),
-            .groups = 'drop')
-
-# Create improved visualization
-p <- ggplot(summary) +
-  geom_line(aes(Year, `Metric Tons Per Capita`, color = Region), size = 1) +
-  scale_color_brewer(palette = "Set1") +  # Better color palette for distinction
-  theme_minimal() +
-  labs(
-    title = 'Average Metric Tons per Capita of CO2',
-    subtitle = 'Separated by Region',
-    x = 'Year',
-    y = 'Metric Tons Per Capita',
-    color = 'Region'
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    axis.title = element_text(face = "bold"),
-    legend.position = "bottom",
-    panel.grid.minor = element_blank()
-  ) +
-  # Add annotations for major trend changes
-  geom_point(data = subset(summary, 
-                           (Region == "Europe" & Year == 2008) | 
-                             (Region == "Asia" & Year == 2010)), 
-             aes(Year, `Metric Tons Per Capita`, color = Region), size = 3)
-
-# Convert to interactive plot with plotly (if desired)
-
-ggplotly(p, tooltip = c("Year", "Metric Tons Per Capita", "Region"))
-```
-
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  echo = TRUE, 
-  message = FALSE, 
-  warning = FALSE,
-  fig.width = 5,
-  fig.height = 3,
-  dpi = 200
-)
-```
-
-
-```{r}
-# Load required libraries
+# ------------------------------------------------------------------
+# 0. Load required packages
+# ------------------------------------------------------------------
+library(shiny)      # ← Comment out if you don’t need the Shiny dashboard
 library(tidyverse)
-library(tidytext)
-library(tm)
-library(SnowballC)
-library(Rtsne)
-library(ggplot2)
 library(plotly)
-library(scales)
-library(wordcloud)
-library(viridis)
 library(DT)
 
-# Set random seed for reproducibility
-set.seed(42)
+# ------------------------------------------------------------------
+# 1. Load and preprocess CO₂ data
+# ------------------------------------------------------------------
+co2 <- read_csv(
+  "https://raw.githubusercontent.com/JIHONGKING/Data_Analysis/refs/heads/main/carbon.csv",
+  show_col_types = FALSE
+) |>
+  mutate(Year = as.integer(substr(Date, nchar(Date) - 3, nchar(Date))))
 
-# Read data (update path as needed)
+co2_sum <- co2 |>
+  group_by(Region, Year) |>
+  summarise(
+    per_capita = mean(`Metric Tons Per Capita`, na.rm = TRUE),
+    total_kt   = sum(`Kilotons of Co2`,          na.rm = TRUE),
+    .groups = "drop"
+  )
 
-df <- read.csv("https://raw.githubusercontent.com/JIHONGKING/Data_Analysis/refs/heads/main/filtered_amazon_reviews.csv", stringsAsFactors = FALSE)
+regions <- sort(unique(co2_sum$Region))
+yr_min  <- min(co2_sum$Year)
+yr_max  <- max(co2_sum$Year)
 
-# Clean and preprocess data
-df_clean <- df %>%
-  filter(!is.na(Text),
-         Score %in% 1:5,
-         nchar(Text) > 50,   # Filter out very short reviews
-         nchar(Text) < 1000) %>% # Filter out extremely long reviews
-  mutate(sentiment = case_when(
-    Score <= 2 ~ "Negative",
-    Score == 3 ~ "Neutral",
-    Score >= 4 ~ "Positive"
-  )) %>%
-  distinct(Text, .keep_all = TRUE)  # Remove duplicates
+# ------------------------------------------------------------------
+# 2. Interactive line chart (no Shiny required)
+# ------------------------------------------------------------------
+p <- ggplot(co2_sum, aes(Year, per_capita, color = Region)) +
+  geom_line(linewidth = 1) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Average CO₂ Emissions per Capita (1990–2019)",
+    x = NULL,
+    y = "Metric tons per capita",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
 
-# Display sentiment distribution before sampling
-sentiment_counts <- df_clean %>%
-  count(sentiment) %>%
-  mutate(percentage = n / sum(n) * 100)
+ggplotly(p, tooltip = c("Year", "per_capita", "Region"))
 
-# Create a balanced sample with 500 reviews from each sentiment category
-# Function to sample with replacement if n > available data
-sample_n_or_all <- function(df, n) {
-  if (nrow(df) >= n) {
-    return(sample_n(df, n))
-  } else {
-    return(sample_n(df, n, replace = TRUE))
-  }
-}
-
-# Stratified sampling for balanced sentiment representation
-df_neg <- df_clean %>% filter(sentiment == "Negative") %>% sample_n_or_all(500)
-df_neu <- df_clean %>% filter(sentiment == "Neutral") %>% sample_n_or_all(500)
-df_pos <- df_clean %>% filter(sentiment == "Positive") %>% sample_n_or_all(500)
-
-df_sample <- bind_rows(df_neg, df_neu, df_pos)
-
-# Text preprocessing
-reviews_tidy <- df_sample %>%
-  select(Id, Text, sentiment) %>%
-  unnest_tokens(word, Text) %>%
-  # Remove stop words
-  anti_join(stop_words) %>%
-  # Filter out short words (often not meaningful)
-  filter(nchar(word) > 2) %>%
-  # Apply stemming to group related words
-  mutate(word = wordStem(word)) %>%
-  count(Id, sentiment, word, sort = TRUE) %>%
-  ungroup()
-
-# Calculate TF-IDF
-tfidf <- reviews_tidy %>%
-  bind_tf_idf(word, Id, n)
-
-# Create Document-Term Matrix
-dtm <- tfidf %>%
-  cast_dtm(document = Id, term = word, value = tf_idf)
-
-# Convert to matrix
-dtm_mat <- as.matrix(dtm)
-
-# Remove any zero-variance features
-var_cols <- apply(dtm_mat, 2, var)
-dtm_filtered <- dtm_mat[, var_cols > 0]
-
-# Map back sentiment information
-ids <- rownames(dtm_filtered)
-sentiment_map <- df_sample %>% 
-  select(Id, sentiment, Text, Score) %>%
-  mutate(Id = as.character(Id))
-
-# Run t-SNE
-set.seed(123)  # For reproducibility
-tsne_model <- Rtsne(dtm_filtered, dims = 2, 
-                    perplexity = 30,  # Hyperparameter that balances local and global structure
-                    max_iter = 1000,  # More iterations for better convergence
-                    verbose = TRUE)
-
-# Combine t-SNE results with metadata
-df_tsne <- as.data.frame(tsne_model$Y) %>%
-  mutate(Id = ids) %>%
-  left_join(sentiment_map, by = "Id") %>%
-  # Create a shortened text version for tooltips
-  mutate(short_text = str_trunc(Text, 200))
-
-# Create custom tooltip for interactive plot
-tooltip_text <- paste0(
-  "Rating: ", df_tsne$Score, "<br>",
-  "Sentiment: ", df_tsne$sentiment, "<br>",
-  "Review: ", df_tsne$short_text
-)
-
-# Interactive visualization
-p <- plot_ly(df_tsne,
-             x = ~V1,
-             y = ~V2,
-             type = "scatter",
-             mode = "markers",
-             color = ~sentiment,
-             colors = c("Negative" = "#E74C3C", 
-                        "Neutral" = "#7F8C8D", 
-                        "Positive" = "#2ECC71"),
-             text = tooltip_text,
-             hoverinfo = "text",
-             marker = list(
-               size = 8,
-               opacity = 0.7,
-               line = list(width = 1, color = "#FFFFFF")
-             )) %>%
-  layout(
-    title = list(
-      text = "Interactive t-SNE Map of Amazon Food Review Sentiments",
-      font = list(size = 20)
+# ------------------------------------------------------------------
+# 3. (Optional) Shiny dashboard with filters and data table
+# ------------------------------------------------------------------
+ui <- fluidPage(
+  titlePanel("Global CO₂ Emissions Explorer"),
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("yr", "Year range:",
+                  min = yr_min, max = yr_max,
+                  value = c(yr_min, yr_max), step = 1),
+      checkboxGroupInput("reg", "Regions:",
+                         choices = regions, selected = regions),
+      hr(),
+      downloadButton("dl", "Download filtered data")
     ),
-    xaxis = list(
-      title = "t-SNE Dimension 1",
-      zeroline = FALSE,
-      showgrid = FALSE
-    ),
-    yaxis = list(
-      title = "t-SNE Dimension 2",
-      zeroline = FALSE,
-      showgrid = FALSE
-    ),
-    legend = list(
-      title = list(text = "Sentiment"),
-      x = 0.01,
-      y = 0.99,
-      bgcolor = "rgba(255, 255, 255, 0.7)"
-    ),
-    margin = list(l = 50, r = 50, b = 100, t = 100),
-    annotations = list(
-      x = 0.5,
-      y = -0.1,
-      xref = "paper",
-      yref = "paper",
-      text = "Hover over points to see review details. Notice how sentiments cluster in the semantic space.",
-      showarrow = FALSE
+    mainPanel(
+      plotlyOutput("lineplot", height = "450px"),
+      hr(),
+      DTOutput("tbl")
     )
   )
+)
 
-# Static visualization 1: Top words by sentiment
-# Calculate word importance per sentiment
-word_importance <- reviews_tidy %>%
-  group_by(sentiment, word) %>%
-  summarize(
-    frequency = n(),
-    total_reviews = n_distinct(Id),
-    .groups = "drop"
-  ) %>%
-  # Filter words that appear in at least 10 reviews
-  filter(frequency >= 10) %>%
-  # Calculate the word's distinctiveness for each sentiment
-  group_by(word) %>%
-  mutate(
-    total_freq = sum(frequency),
-    sentiment_ratio = frequency / total_freq
-  ) %>%
-  ungroup() %>%
-  # Keep words that are highly associated with a sentiment
-  filter(sentiment_ratio > 0.6)
-
-# Get top words for each sentiment
-top_words <- word_importance %>%
-  group_by(sentiment) %>%
-  top_n(15, frequency) %>%
-  ungroup() %>%
-  mutate(word = reorder_within(word, frequency, sentiment))
-
-# Static visualization 2: Sentiment distribution by rating
-rating_sentiment_plot <- df_sample %>%
-  count(Score, sentiment) %>%
-  group_by(Score) %>%
-  mutate(percentage = n / sum(n) * 100) %>%
-  ggplot(aes(x = factor(Score), y = sentiment, fill = percentage)) +
-  geom_tile() +
-  geom_text(aes(label = paste0(round(percentage), "%")), 
-            color = "white", fontface = "bold") +
-  scale_fill_viridis(option = "D", direction = -1) +
-  labs(
-    title = "Sentiment Distribution Across Rating Spectrum",
-    subtitle = "Mapping between numerical ratings and sentiment categories",
-    x = "Rating (1-5 stars)",
-    y = NULL,
-    fill = "% of Reviews"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    legend.position = "right",
-    panel.grid = element_blank(),
-    axis.text = element_text(size = 12),
-    plot.title = element_text(face = "bold")
+server <- function(input, output, session) {
+  
+  # Reactive filter
+  filtered <- reactive({
+    co2_sum |>
+      filter(Year >= input$yr[1], Year <= input$yr[2],
+             Region %in% input$reg)
+  })
+  
+  # Line chart
+  output$lineplot <- renderPlotly({
+    gg <- ggplot(filtered(), aes(Year, per_capita, color = Region)) +
+      geom_line(linewidth = 1) +
+      scale_color_brewer(palette = "Set1") +
+      labs(x = NULL, y = "t CO₂ per capita") +
+      theme_minimal(base_size = 13) +
+      theme(legend.position = "bottom")
+    ggplotly(gg, tooltip = c("Year", "per_capita", "Region"))
+  })
+  
+  # Data table
+  output$tbl <- renderDT({
+    datatable(
+      filtered() |> arrange(desc(per_capita)),
+      options  = list(pageLength = 15, dom = "tip"),
+      rownames = FALSE
+    ) |>
+      formatRound(c("per_capita", "total_kt"), 2)
+  })
+  
+  # CSV download
+  output$dl <- downloadHandler(
+    filename = function() sprintf("co2_emissions_%s-%s.csv", input$yr[1], input$yr[2]),
+    content  = function(file) write_csv(filtered(), file)
   )
+}
 
-# Display visualizations
-p
-
-
-
+# Launch the Shiny app (comment out if not needed)
+# shinyApp(ui, server)
