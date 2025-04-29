@@ -1,16 +1,3 @@
----
-  title: "Amazon Fine Food Reviews Sentiment Analysis"
-author: "Jihong Min"
-date: "`r Sys.Date()`"
-output: 
-  html_document:
-  self_contained: true
-theme: flatly
-highlight: tango
-toc: true
-toc_float: true
-code_folding: hide
----
 
 library(plotly)
 # Load and preprocess data
