@@ -48,28 +48,28 @@ ui <- fluidPage(
   tabsetPanel(
     # Tab 1: Basic Emissions Explorer 
     tabPanel("Emissions Explorer", 
-      sidebarLayout(
-        sidebarPanel(
-          sliderInput("yr", "Year range:",
-                    min = yr_min, max = yr_max,
-                    value = c(yr_min, yr_max), step = 1),
-          checkboxGroupInput("reg", "Regions:",
-                           choices = regions, selected = regions),
-          radioButtons("metric_type", "Metric:",
-                      choices = list(
-                        "Per Capita (Metric Tons)" = "per_capita", 
-                        "Total Emissions (Kilotons)" = "total_kt"
-                      ),
-                      selected = "per_capita"),
-          hr(),
-          downloadButton("dl", "Download filtered data")
-        ),
-        mainPanel(
-          plotlyOutput("lineplot", height = "450px"),
-          hr(),
-          DTOutput("tbl")
-        )
-      )
+             sidebarLayout(
+               sidebarPanel(
+                 sliderInput("yr", "Year range:",
+                             min = yr_min, max = yr_max,
+                             value = c(yr_min, yr_max), step = 1),
+                 checkboxGroupInput("reg", "Regions:",
+                                    choices = regions, selected = regions),
+                 radioButtons("metric_type", "Metric:",
+                              choices = list(
+                                "Per Capita (Metric Tons)" = "per_capita", 
+                                "Total Emissions (Kilotons)" = "total_kt"
+                              ),
+                              selected = "per_capita"),
+                 hr(),
+                 downloadButton("dl", "Download filtered data")
+               ),
+               mainPanel(
+                 plotlyOutput("lineplot", height = "450px"),
+                 hr(),
+                 DTOutput("tbl")
+               )
+             )
     ),
     
     # Tab 2: Regional Heatmap
@@ -578,8 +578,8 @@ server <- function(input, output, session) {
         
         if(nrow(turning_points) > 0) {
           p <- p + geom_point(data = turning_points, 
-                             aes(x = Year, y = value, color = Region), 
-                             size = 4)
+                              aes(x = Year, y = value, color = Region), 
+                              size = 4)
         }
       }
       
