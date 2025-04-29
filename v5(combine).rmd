@@ -1,0 +1,1137 @@
+# CO2 Emissions Explorer - Integrated Dashboard
+# Group 18: Anirudh, Tanmay, Max, Giancarlo, Jihong
+# Data: Carbon (CO2) Emissions dataset (1990-2019)
+
+# ------------------------------------------------------------------
+# 0. Load required packages
+# ------------------------------------------------------------------
+library(shiny)
+library(tidyverse)
+library(plotly)
+library(DT)
+library(scales)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(RColorBrewer)
+
+# ------------------------------------------------------------------
+# 1. Load and preprocess CO₂ data
+# ------------------------------------------------------------------
+co2 <- read_csv(
+  "https://raw.githubusercontent.com/JIHONGKING/Data_Analysis/refs/heads/main/carbon.csv",
+  show_col_types = FALSE
+) |>
+  mutate(Year = as.integer(substr(Date, nchar(Date) - 3, nchar(Date))))
+
+co2_sum <- co2 |>
+  group_by(Region, Year) |>
+  summarise(
+    per_capita = mean(`Metric Tons Per Capita`, na.rm = TRUE),
+    total_kt   = sum(`Kilotons of Co2`,          na.rm = TRUE),
+    .groups = "drop"
+  )
+
+regions <- sort(unique(co2_sum$Region))
+yr_min  <- min(co2_sum$Year)
+yr_max  <- max(co2_sum$Year)
+
+# UI Definition
+ui <- fluidPage(
+  # App title and description
+  titlePanel("Global CO2 Emissions Explorer (1990-2019)"),
+  
+  p("This interactive dashboard visualizes CO2 emissions across regions and countries over time, 
+    allowing comparison of emission patterns from multiple perspectives."),
+  
+  # Tab layout
+  tabsetPanel(
+    # Tab 1: Basic Emissions Explorer 
+    tabPanel("Emissions Explorer", 
+      sidebarLayout(
+        sidebarPanel(
+          sliderInput("yr", "Year range:",
+                    min = yr_min, max = yr_max,
+                    value = c(yr_min, yr_max), step = 1),
+          checkboxGroupInput("reg", "Regions:",
+                           choices = regions, selected = regions),
+          radioButtons("metric_type", "Metric:",
+                      choices = list(
+                        "Per Capita (Metric Tons)" = "per_capita", 
+                        "Total Emissions (Kilotons)" = "total_kt"
+                      ),
+                      selected = "per_capita"),
+          hr(),
+          downloadButton("dl", "Download filtered data")
+        ),
+        mainPanel(
+          plotlyOutput("lineplot", height = "450px"),
+          hr(),
+          DTOutput("tbl")
+        )
+      )
+    ),
+    
+    # Tab 2: Regional Heatmap
+    tabPanel("Regional Heatmap", 
+             sidebarLayout(
+               sidebarPanel(
+                 h4("Year Range:"),
+                 sliderInput("year_range",
+                             "",
+                             min = 1990,
+                             max = 2019,
+                             value = c(1990, 2019),
+                             step = 1,
+                             sep = ""),
+                 
+                 h4("Regions to Display:"),
+                 checkboxGroupInput('regions_selected', '',
+                                    c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania'),
+                                    selected = c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania')),
+                 
+                 radioButtons("data_type", "Data Type:",
+                              choices = list(
+                                "Total CO₂ Emissions (Kilotons)" = "total", 
+                                "Per Capita CO₂ Emissions (Metric Tons)" = "per_capita"
+                              ),
+                              selected = "total"),
+                 
+                 radioButtons("sort_by", "Sort Regions By:",
+                              choices = list(
+                                "Total Emissions (Descending)" = "desc",
+                                "Total Emissions (Ascending)" = "asc",
+                                "Name (A-Z)" = "name"
+                              ),
+                              selected = "desc"),
+                 
+                 selectInput("color_scheme", "Color Scheme:",
+                             choices = list(
+                               "Yellow-Orange-Red" = "YlOrRd",
+                               "Red-Yellow-Blue" = "RdYlBu",
+                               "Red-Yellow-Green" = "RdYlGn",
+                               "Viridis" = "viridis"
+                             ),
+                             selected = "YlOrRd"),
+                 
+                 checkboxInput("use_log_scale", "Use Logarithmic Scale", FALSE),
+                 
+                 hr(),
+                 downloadButton("download_heatmap_data", "Download Data"),
+                 br(), br(),
+                 actionButton("reset_filters", "Reset All Filters", 
+                              icon = icon("refresh"), 
+                              style = "width: 100%")
+               ),
+               
+               mainPanel(
+                 plotOutput("heatmap_plot", height = "400px"),
+                 br(),
+                 h4("Data Table"),
+                 DT::dataTableOutput("heatmap_table"),
+                 br(),
+                 h4("Insights"),
+                 htmlOutput("heatmap_insights")
+               )
+             )
+    ),
+    
+    # Tab 3: Trend Analysis
+    tabPanel("Trend Analysis", 
+             sidebarLayout(
+               sidebarPanel(
+                 h4("Select Year Range:"),
+                 sliderInput("trend_year_range", "",
+                             min = 1990, 
+                             max = 2019,
+                             value = c(1990, 2019),
+                             step = 1,
+                             sep = ""),
+                 
+                 h4("Select Regions:"),
+                 checkboxGroupInput("trend_regions", "",
+                                    c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania'),
+                                    selected = c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania')),
+                 
+                 radioButtons("trend_data_type", "Data Type:",
+                              choices = list(
+                                "Total CO₂ Emissions (Kilotons)" = "total", 
+                                "Per Capita CO₂ Emissions (Metric Tons)" = "per_capita"
+                              ),
+                              selected = "total"),
+                 
+                 radioButtons("trend_chart_type", "Chart Type:",
+                              choices = list(
+                                "Line Chart" = "line",
+                                "Area Chart" = "area",
+                                "Stacked Area Chart" = "stacked"
+                              ),
+                              selected = "line"),
+                 
+                 checkboxInput("show_global_avg", "Show Global Average", TRUE),
+                 
+                 hr(),
+                 downloadButton("download_trend_data", "Download Data"),
+                 br(), br(),
+                 actionButton("reset_trend", "Reset Trend Filters", 
+                              icon = icon("refresh"), 
+                              style = "width: 100%")
+               ),
+               
+               mainPanel(
+                 plotlyOutput("trend_plot", height = "500px"),
+                 br(),
+                 h4("Trend Insights"),
+                 htmlOutput("trend_insights"),
+                 br(),
+                 h4("Regional Comparison"),
+                 plotOutput("region_comparison", height = "300px")
+               )
+             )
+    ),
+    
+    # Tab 4: World Map
+    tabPanel("World Map", 
+             sidebarLayout(
+               sidebarPanel(
+                 selectInput("map_year", "Select Year:", 
+                             choices = 1990:2019, 
+                             selected = 2019),
+                 
+                 radioButtons("map_view_type", "Emission View Type:",
+                              choices = list(
+                                "Total Emissions (Kilotons)" = "total", 
+                                "Per Capita Emissions (Metric Tons)" = "per_capita"
+                              )),
+                 
+                 hr(),
+                 
+                 checkboxGroupInput("map_region_filter", "Filter by Region:",
+                                    choices = c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania'),
+                                    selected = c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania')),
+                 
+                 hr(),
+                 
+                 selectInput(
+                   "country_select",
+                   "Navigate to Country:",
+                   choices = list("Select a country" = ""),
+                   selected = "",
+                   selectize = TRUE
+                 ),
+                 
+                 downloadButton("download_map_data", "Download Data")
+               ),
+               
+               mainPanel(
+                 leafletOutput("co2_map", height = "500px"),
+                 div(style = "margin-top: 20px;"),
+                 uiOutput("selected_country_info")
+               )
+             )
+    ),
+    
+    # Tab 5: Timeline View
+    tabPanel("Timeline View", 
+             fluidRow(
+               column(12,
+                      h2(textOutput("timeline_year_text"), align = "center"),
+                      sliderInput("timeline_year", "Select Year:", 
+                                  min = 1990, max = 2019,
+                                  value = 2019, 
+                                  step = 1,
+                                  width = "100%",
+                                  animate = animationOptions(interval = 800, loop = FALSE))
+               )
+             ),
+             
+             fluidRow(
+               column(12, 
+                      plotlyOutput("timeline_plot", height = "500px")
+               )
+             ),
+             
+             fluidRow(
+               column(12,
+                      wellPanel(
+                        h3("Emissions Details"),
+                        DTOutput("timeline_table"),
+                        htmlOutput("timeline_insight")
+                      )
+               )
+             )
+    ),
+    
+    # Tab 6: About
+    tabPanel("About", 
+             fluidRow(
+               column(12,
+                      wellPanel(
+                        h3("About this Dashboard"),
+                        p("This interactive dashboard was developed by Group 18 (Anirudh, Tanmay, Max, Giancarlo, Jihong) 
+                          to explore global CO2 emissions patterns from 1990 to 2019."),
+                        p("The visualizations leverage multiple approaches to provide different perspectives on emissions data:"),
+                        tags$ul(
+                          tags$li(strong("Emissions Explorer:"), "Simple interface for quick exploration of emissions data"),
+                          tags$li(strong("Regional Heatmap:"), "Provides an overview of emissions intensity across regions and time"),
+                          tags$li(strong("Trend Analysis:"), "Shows detailed time-series analysis of emissions with multiple visualization options"),
+                          tags$li(strong("World Map:"), "Offers geographic context to emissions data with country-level detail"),
+                          tags$li(strong("Timeline View:"), "Presents cumulative emissions with interactive year selection")
+                        ),
+                        h4("Data Source"),
+                        p("Carbon (CO2) Emissions dataset by Ravender Singh Rana on Kaggle"),
+                        h4("Implementation"),
+                        p("Built with R Shiny, ggplot2, plotly, leaflet, and other visualization libraries")
+                      )
+               )
+             )
+    )
+  )
+)
+
+# Server logic
+server <- function(input, output, session) {
+  
+  # ------------------------------------------------------------------
+  # EMISSIONS EXPLORER FUNCTIONALITY
+  # ------------------------------------------------------------------
+  
+  # Reactive filter for basic explorer
+  filtered <- reactive({
+    co2_sum |>
+      filter(Year >= input$yr[1], Year <= input$yr[2],
+             Region %in% input$reg)
+  })
+  
+  # Line chart for basic explorer
+  output$lineplot <- renderPlotly({
+    metric_col <- input$metric_type
+    metric_label <- if(input$metric_type == "per_capita") {
+      "Metric tons per capita"
+    } else {
+      "Kilotons of CO2"
+    }
+    
+    gg <- ggplot(filtered(), aes(Year, .data[[metric_col]], color = Region)) +
+      geom_line(linewidth = 1) +
+      scale_color_brewer(palette = "Set1") +
+      labs(
+        title = paste("CO₂ Emissions by Region (", input$yr[1], "-", input$yr[2], ")", sep=""),
+        x = NULL, 
+        y = metric_label,
+        color = NULL
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(legend.position = "bottom")
+    
+    ggplotly(gg, tooltip = c("Year", metric_col, "Region"))
+  })
+  
+  # Data table for basic explorer
+  output$tbl <- renderDT({
+    sort_col <- input$metric_type
+    
+    datatable(
+      filtered() |> arrange(desc(.data[[sort_col]])),
+      options = list(pageLength = 15, dom = "tip"),
+      rownames = FALSE
+    ) |>
+      formatRound(c("per_capita", "total_kt"), 2)
+  })
+  
+  # CSV download for basic explorer
+  output$dl <- downloadHandler(
+    filename = function() sprintf("co2_emissions_%s-%s.csv", input$yr[1], input$yr[2]),
+    content = function(file) write_csv(filtered(), file)
+  )
+  
+  # ------------------------------------------------------------------
+  # HEATMAP TAB FUNCTIONALITY
+  # ------------------------------------------------------------------
+  
+  # Region data aggregation
+  region_data <- reactive({
+    data <- co2
+    
+    if(input$data_type == "total") {
+      data %>% 
+        group_by(Region, Year) %>% 
+        summarise(value = sum(`Kilotons of Co2`, na.rm = TRUE),
+                  .groups = "drop") %>%
+        mutate(metric = "Total CO₂ Emissions (Kilotons)")
+    } else {
+      data %>% 
+        group_by(Region, Year) %>% 
+        summarise(value = mean(`Metric Tons Per Capita`, na.rm = TRUE),
+                  .groups = "drop") %>%
+        mutate(metric = "Per Capita CO₂ Emissions (Metric Tons)")
+    }
+  })
+  
+  # Filtered heatmap data
+  filtered_heatmap_data <- reactive({
+    df <- region_data() %>%
+      filter(Year >= input$year_range[1], 
+             Year <= input$year_range[2], 
+             Region %in% input$regions_selected)
+    
+    if(input$sort_by == "desc") {
+      df %>% 
+        group_by(Region) %>% 
+        mutate(total_value = sum(value, na.rm = TRUE)) %>%
+        ungroup() %>%
+        mutate(Region = fct_reorder(Region, total_value, .desc = TRUE)) %>%
+        select(-total_value)
+    } else if(input$sort_by == "asc") {
+      df %>% 
+        group_by(Region) %>% 
+        mutate(total_value = sum(value, na.rm = TRUE)) %>%
+        ungroup() %>%
+        mutate(Region = fct_reorder(Region, total_value)) %>%
+        select(-total_value)
+    } else {
+      df %>% mutate(Region = factor(Region, levels = sort(unique(Region))))
+    }
+  })
+  
+  # Heatmap plot
+  output$heatmap_plot <- renderPlot({
+    req(filtered_heatmap_data())
+    df <- filtered_heatmap_data()
+    
+    if(input$use_log_scale && all(df$value > 0)) {
+      df$value <- log10(df$value)
+      value_label <- paste("Log10(", unique(df$metric), ")")
+    } else {
+      value_label <- unique(df$metric)
+    }
+    
+    color_function <- if(input$color_scheme == "viridis") {
+      scale_fill_viridis_b(option = "plasma", n.breaks = 7)
+    } else {
+      scale_fill_distiller(
+        palette = input$color_scheme, 
+        direction = if(input$color_scheme == "RdYlBu") 1 else -1,
+        n.breaks = 7
+      )
+    }
+    
+    ggplot(df, aes(x = Year, y = Region, fill = value)) +
+      geom_tile(color = "white", size = 0.2) +
+      color_function +
+      labs(
+        title = paste("CO₂ Emissions by Region (", input$year_range[1], "-", input$year_range[2], ")", sep = ""),
+        x = "Year",
+        y = "Region",
+        fill = value_label
+      ) +
+      scale_x_continuous(breaks = seq(input$year_range[1], input$year_range[2], by = 2)) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(color = 'black', size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        panel.grid.major = element_line(color = "gray95"),
+        panel.grid.minor = element_blank()
+      )
+  })
+  
+  # Heatmap data table
+  output$heatmap_table <- DT::renderDataTable({
+    req(filtered_heatmap_data())
+    df <- filtered_heatmap_data() %>%
+      pivot_wider(names_from = Year, values_from = value) %>%
+      select(-metric)
+    
+    datatable(
+      df,
+      options = list(
+        pageLength = 5,
+        dom = 'tp',
+        scrollX = TRUE
+      )
+    ) %>%
+      formatRound(columns = as.character(seq(input$year_range[1], input$year_range[2])), digits = 2)
+  })
+  
+  # Heatmap insights
+  output$heatmap_insights <- renderUI({
+    req(filtered_heatmap_data())
+    df <- filtered_heatmap_data()
+    
+    latest_year <- max(df$Year)
+    latest_data <- df %>% filter(Year == latest_year)
+    max_region <- latest_data %>% arrange(desc(value)) %>% slice(1)
+    
+    start_year <- input$year_range[1]
+    change_data <- df %>%
+      filter(Year %in% c(start_year, latest_year)) %>%
+      pivot_wider(names_from = Year, values_from = value) %>%
+      mutate(change_pct = (!!sym(as.character(latest_year)) - !!sym(as.character(start_year))) /
+               !!sym(as.character(start_year)) * 100)
+    largest_change <- change_data %>% arrange(desc(abs(change_pct))) %>% slice(1)
+    
+    HTML(paste0(
+      "<p>In ", latest_year, ", <strong>", max_region$Region, "</strong> had the highest ", 
+      tolower(unique(df$metric)), " at <strong>",
+      format(round(max_region$value, 2), big.mark = ","), "</strong>.</p>",
+      "<p>From ", start_year, " to ", latest_year, ", <strong>", largest_change$Region, "</strong> recorded the largest ", 
+      ifelse(largest_change$change_pct >= 0, "increase", "decrease"), 
+      " (", round(abs(largest_change$change_pct), 2), "%).</p>",
+      "<p><em>Darker colors on the heatmap indicate higher emission values.</em></p>"
+    ))
+  })
+  
+  # Download heatmap data
+  output$download_heatmap_data <- downloadHandler(
+    filename = function() {
+      paste("co2_emissions_heatmap_", input$year_range[1], "-", input$year_range[2], ".csv", sep = "")
+    },
+    content = function(file) {
+      write.csv(filtered_heatmap_data(), file, row.names = FALSE)
+    }
+  )
+  
+  # Reset heatmap filters
+  observeEvent(input$reset_filters, {
+    updateSliderInput(session, "year_range", value = c(1990, 2019))
+    updateCheckboxGroupInput(session, "regions_selected", 
+                             selected = c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania'))
+    updateRadioButtons(session, "data_type", selected = "total")
+    updateRadioButtons(session, "sort_by", selected = "desc")
+    updateSelectInput(session, "color_scheme", selected = "YlOrRd")
+    updateCheckboxInput(session, "use_log_scale", value = FALSE)
+  })
+  
+  # ---------------------------
+  # TREND ANALYSIS FUNCTIONALITY
+  # ---------------------------
+  
+  # Filtered trend data
+  filtered_trend_data <- reactive({
+    if(input$trend_data_type == "total") {
+      co2 %>%
+        filter(Year >= input$trend_year_range[1],
+               Year <= input$trend_year_range[2],
+               Region %in% input$trend_regions) %>%
+        group_by(Region, Year) %>%
+        summarise(value = sum(`Kilotons of Co2`, na.rm = TRUE),
+                  .groups = "drop") %>%
+        mutate(metric = "Total CO₂ Emissions (Kilotons)")
+    } else {
+      co2 %>%
+        filter(Year >= input$trend_year_range[1],
+               Year <= input$trend_year_range[2],
+               Region %in% input$trend_regions) %>%
+        group_by(Region, Year) %>%
+        summarise(value = mean(`Metric Tons Per Capita`, na.rm = TRUE),
+                  .groups = "drop") %>%
+        mutate(metric = "Per Capita CO₂ Emissions (Metric Tons)")
+    }
+  })
+  
+  # Global average data
+  global_avg_data <- reactive({
+    if(input$trend_data_type == "total") {
+      co2 %>%
+        filter(Year >= input$trend_year_range[1],
+               Year <= input$trend_year_range[2]) %>%
+        group_by(Year) %>%
+        summarise(value = sum(`Kilotons of Co2`, na.rm = TRUE) / n_distinct(Region),
+                  .groups = "drop") %>%
+        mutate(Region = "Global Average",
+               metric = "Total CO₂ Emissions (Kilotons)")
+    } else {
+      co2 %>%
+        filter(Year >= input$trend_year_range[1],
+               Year <= input$trend_year_range[2]) %>%
+        group_by(Year) %>%
+        summarise(value = mean(`Metric Tons Per Capita`, na.rm = TRUE),
+                  .groups = "drop") %>%
+        mutate(Region = "Global Average",
+               metric = "Per Capita CO₂ Emissions (Metric Tons)")
+    }
+  })
+  
+  # Trend plot
+  output$trend_plot <- renderPlotly({
+    req(filtered_trend_data())
+    trend_data <- filtered_trend_data()
+    
+    if(input$show_global_avg) {
+      trend_data <- rbind(trend_data, global_avg_data())
+    }
+    
+    if(input$trend_chart_type == "line") {
+      p <- ggplot(trend_data, aes(x = Year, y = value, color = Region, group = Region)) +
+        geom_line(size = 1.2) +
+        geom_point(size = 2) +
+        scale_color_brewer(palette = "Set1")  # Better color palette
+      
+      # Key turning points - identify significant trend changes
+      if(input$trend_data_type == "per_capita") {
+        # Identify key turning points for per capita view
+        turning_points <- trend_data %>%
+          filter((Region == "Europe" & Year == 2008) | (Region == "Asia" & Year == 2010))
+        
+        if(nrow(turning_points) > 0) {
+          p <- p + geom_point(data = turning_points, 
+                             aes(x = Year, y = value, color = Region), 
+                             size = 4)
+        }
+      }
+      
+      if(input$show_global_avg) {
+        p <- p + geom_line(data = subset(trend_data, Region == "Global Average"),
+                           aes(x = Year, y = value),
+                           linetype = "dashed",
+                           size = 1.5)
+      }
+      
+    } else if(input$trend_chart_type == "area") {
+      p <- ggplot(trend_data, aes(x = Year, y = value, fill = Region, group = Region)) +
+        geom_area(alpha = 0.6, position = "identity") +
+        scale_fill_brewer(palette = "Set1")
+      
+    } else { # stacked
+      p <- ggplot(trend_data, aes(x = Year, y = value, fill = Region)) +
+        geom_area(alpha = 0.8, position = "stack") +
+        scale_fill_brewer(palette = "Set1")
+    }
+    
+    p <- p +
+      labs(
+        title = paste("CO₂ Emissions Trends by Region (", 
+                      input$trend_year_range[1], "-", input$trend_year_range[2], ")", sep = ""),
+        x = "Year",
+        y = unique(trend_data$metric),
+        color = "Region",
+        fill = "Region"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 14, face = "bold"),
+        axis.text = element_text(color = 'black', size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.position = "bottom",
+        panel.grid.minor = element_blank()
+      )
+    
+    ggplotly(p, tooltip = c("Year", "value", "Region")) %>% 
+      layout(hovermode = "x unified")
+  })
+  
+  # Trend insights
+  output$trend_insights <- renderUI({
+    req(filtered_trend_data())
+    df <- filtered_trend_data()
+    
+    start_year <- min(df$Year)
+    end_year <- max(df$Year)
+    
+    growth_rates <- df %>%
+      group_by(Region) %>%
+      summarise(
+        start_value = value[Year == start_year],
+        end_value = value[Year == end_year],
+        growth_rate = (end_value - start_value) / start_value * 100,
+        .groups = "drop"
+      ) %>%
+      arrange(desc(growth_rate))
+    
+    highest_growth <- growth_rates %>% slice(1)
+    
+    total_start <- sum(growth_rates$start_value, na.rm = TRUE)
+    total_end <- sum(growth_rates$end_value, na.rm = TRUE)
+    total_change <- (total_end - total_start) / total_start * 100
+    
+    HTML(paste0(
+      "<p>Between ", start_year, " and ", end_year, ", <strong>", highest_growth$Region, 
+      "</strong> showed the highest growth rate at <strong>", 
+      round(highest_growth$growth_rate, 2), "%</strong>.</p>",
+      "<p>Overall, total ", tolower(unique(df$metric)), " across all selected regions ", 
+      ifelse(total_change >= 0, "increased", "decreased"), " by <strong>",
+      round(abs(total_change), 2), "%</strong> during this period.</p>",
+      "<p>The chart reveals ",
+      ifelse(input$trend_data_type == "total", 
+             "how Asia's emissions accelerated dramatically after 2000, while Europe's growth moderated.",
+             "significant variations in per capita emissions, with Europe showing a declining trend while Asia continues to rise."),
+      "</p>"
+    ))
+  })
+  
+  # Region comparison
+  output$region_comparison <- renderPlot({
+    req(filtered_trend_data())
+    df <- filtered_trend_data()
+    
+    start_year <- min(df$Year)
+    end_year <- max(df$Year)
+    comparison_data <- df %>%
+      filter(Year %in% c(start_year, end_year)) %>%
+      mutate(Year = as.factor(Year))
+    
+    ggplot(comparison_data, aes(x = Region, y = value, fill = Year)) +
+      geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+      scale_fill_brewer(palette = "Set1") +
+      labs(
+        title = paste("Regional Comparison:", start_year, "vs", end_year),
+        x = "Region",
+        y = unique(df$metric),
+        fill = "Year"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        axis.text.y = element_text(size = 10)
+      )
+  })
+  
+  # Download trend data
+  output$download_trend_data <- downloadHandler(
+    filename = function() {
+      paste("co2_emissions_trends_", input$trend_year_range[1], "-", input$trend_year_range[2], ".csv", sep = "")
+    },
+    content = function(file) {
+      write.csv(filtered_trend_data(), file, row.names = FALSE)
+    }
+  )
+  
+  # Reset trend filters
+  observeEvent(input$reset_trend, {
+    updateSliderInput(session, "trend_year_range", value = c(1990, 2019))
+    updateCheckboxGroupInput(session, "trend_regions", 
+                             selected = c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania'))
+    updateRadioButtons(session, "trend_data_type", selected = "total")
+    updateRadioButtons(session, "trend_chart_type", selected = "line")
+    updateCheckboxInput(session, "show_global_avg", value = TRUE)
+  })
+  
+  # --------------------------- 
+  # WORLD MAP FUNCTIONALITY
+  # --------------------------- 
+  
+  # Load world map data (excluding Antarctica)
+  world_map <- reactive({
+    ne_countries(scale = "medium", returnclass = "sf") %>%
+      filter(name != "Antarctica")
+  })
+  
+  # Prepare CO2 data with country mapping
+  co2_map_data <- reactive({
+    data <- co2 %>%
+      rename(
+        country = Country,
+        region = Region,
+        date = Date,
+        emissions = `Kilotons of Co2`,
+        per_capita = `Metric Tons Per Capita`
+      )
+    
+    # Country mapping
+    country_mapping_list <- list(
+      "United States of America" = "United States",
+      "United Kingdom" = "United Kingdom of Great Britain and Northern Ireland",
+      "Czech Republic" = "Czechia"
+    )
+    
+    for (i in 1:length(country_mapping_list)) {
+      old_name <- names(country_mapping_list)[i]
+      new_name <- country_mapping_list[[i]]
+      data$country[data$country == old_name] <- new_name
+    }
+    
+    return(data)
+  })
+  
+  # Filtered map data
+  filtered_map_data <- reactive({
+    data <- co2_map_data() %>%
+      filter(Year == input$map_year, region %in% input$map_region_filter)
+    
+    temp_data <- data
+    names(temp_data)[names(temp_data) == "country"] <- "name"
+    
+    left_join(world_map(), temp_data, by = "name")
+  })
+  
+  # Selected country reactive value
+  selectedCountry <- reactiveVal(NULL)
+  
+  # Update country dropdown options
+  observe({
+    data <- co2_map_data() %>% 
+      filter(Year == input$map_year, region %in% input$map_region_filter) %>%
+      arrange(desc(if(input$map_view_type == "total") emissions else per_capita))
+    
+    country_list <- data$country
+    names(country_list) <- data$country
+    
+    updateSelectInput(session, "country_select", 
+                      choices = c("Select a country" = "", country_list),
+                      selected = if(is.null(selectedCountry())) "" else selectedCountry())
+  })
+  
+  # CO2 Map
+  output$co2_map <- renderLeaflet({
+    data <- filtered_map_data()
+    
+    # Color scales
+    if(input$map_view_type == "total") {
+      bins <- c(0, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, Inf)
+      labels <- c("< 1k", "1k-5k", "5k-10k", "10k-50k", "50k-100k", "100k-500k", "500k-1M", "> 1M")
+      pal <- colorBin("YlOrRd", domain = c(0, max(data$emissions, na.rm = TRUE)), bins = bins)
+      title <- "CO2 Emissions (kilotons)"
+      valueCol <- "emissions"
+    } else {
+      bins <- c(0, 1, 3, 5, 7, 10, 15, 20, Inf)
+      labels <- c("< 1", "1-3", "3-5", "5-7", "7-10", "10-15", "15-20", "> 20")
+      pal <- colorBin("YlOrRd", domain = c(0, max(data$per_capita, na.rm = TRUE)), bins = bins)
+      title <- "CO2 per Capita (metric tons)"
+      valueCol <- "per_capita"
+    }
+    
+    # Tooltips
+    tooltips <- vector("character", nrow(data))
+    for(i in 1:nrow(data)) {
+      country <- data[["name"]][i]
+      
+      if(input$map_view_type == "total") {
+        value <- data$emissions[i]
+        if(!is.na(value)) {
+          tooltips[i] <- paste0(
+            "<strong>", country, "</strong><br/>",
+            "Region: ", data$region[i], "<br/>",
+            "CO2 Emissions: ", format(value, big.mark = ","), " kt"
+          )
+        } else {
+          tooltips[i] <- paste0("<strong>", country, "</strong><br/>No emission data")
+        }
+      } else {
+        value <- data$per_capita[i]
+        if(!is.na(value)) {
+          tooltips[i] <- paste0(
+            "<strong>", country, "</strong><br/>",
+            "Region: ", data$region[i], "<br/>",
+            "CO2 per Capita: ", round(value, 2), " t/capita"
+          )
+        } else {
+          tooltips[i] <- paste0("<strong>", country, "</strong><br/>No emission data")
+        }
+      }
+    }
+    
+    # Create map
+    leaflet(data) %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      setView(lng = 0, lat = 20, zoom = 2) %>%
+      addPolygons(
+        fillColor = ~pal(get(valueCol)),
+        weight = 1,
+        opacity = 1, 
+        color = "white",
+        dashArray = "3",
+        fillOpacity = 0.7,
+        highlight = highlightOptions(
+          weight = 2,
+          color = "#666",
+          dashArray = "",
+          fillOpacity = 0.7,
+          bringToFront = TRUE
+        ),
+        label = lapply(tooltips, HTML),
+        labelOptions = labelOptions(
+          style = list(
+            "font-family" = "Arial, sans-serif",
+            "font-size" = "12px",
+            "padding" = "6px 10px",
+            "background-color" = "white", 
+            "box-shadow" = "0 0 15px rgba(0,0,0,0.2)",
+            "border-radius" = "4px"
+          ),
+          direction = "auto",
+          offset = c(0, -5),
+          opacity = 0.9,
+          textsize = "12px"
+        ),
+        layerId = ~name
+      ) %>%
+      addLegend(
+        position = "bottomright",
+        pal = pal,
+        values = bins,
+        title = title,
+        opacity = 0.7,
+        labFormat = function(type, cuts, p) { labels }
+      )
+  })
+  
+  # Map click event
+  observeEvent(input$co2_map_shape_click, {
+    click <- input$co2_map_shape_click
+    country_name <- click$id
+    
+    if(!is.null(country_name)) {
+      selectedCountry(country_name)
+      updateSelectInput(session, "country_select", selected = country_name)
+    }
+  })
+  
+  # Country dropdown selection
+  observeEvent(input$country_select, {
+    if(input$country_select != "") {
+      selectedCountry(input$country_select)
+      
+      data <- filtered_map_data()
+      country_data <- data[data[["name"]] == input$country_select, ]
+      
+      if(nrow(country_data) > 0) {
+        tryCatch({
+          bounds <- st_bbox(st_geometry(country_data))
+          
+          leafletProxy("co2_map") %>%
+            fitBounds(
+              bounds[["xmin"]] - 1, bounds[["ymin"]] - 1,
+              bounds[["xmax"]] + 1, bounds[["ymax"]] + 1
+            )
+        }, error = function(e) {
+          leafletProxy("co2_map") %>% 
+            setView(lng = 0, lat = 20, zoom = 2)
+        })
+      }
+    }
+  }, ignoreInit = TRUE)
+  
+  # Selected country info
+  output$selected_country_info <- renderUI({
+    req(selectedCountry())
+    
+    country_info <- co2_map_data() %>% 
+      filter(country == selectedCountry(), Year == input$map_year)
+    
+    if(nrow(country_info) > 0) {
+      info <- country_info[1,]
+      
+      div(
+        style = "background-color: #f8f9fa; padding: 15px; border-radius: 5px;",
+        h3(paste("Selected Country:", info$country)),
+        p(paste("Region:", info$region)),
+        p(paste("Year:", input$map_year)),
+        p(paste("Total CO2 Emissions:", format(info$emissions, big.mark = ","), "kilotons")),
+        p(paste("CO2 Emissions per Capita:", round(info$per_capita, 2), "metric tons")),
+        
+        h4("Historical Trend:"),
+        plotOutput("country_trend", height = "200px")
+      )
+    } else {
+      div(
+        style = "background-color: #f8f9fa; padding: 15px; border-radius: 5px;",
+        h3("No country selected or no data available for the selected country.")
+      )
+    }
+  })
+  
+  # Country trend plot
+  output$country_trend <- renderPlot({
+    req(selectedCountry())
+    
+    trend_data <- co2_map_data() %>% 
+      filter(country == selectedCountry())
+    
+    if(nrow(trend_data) > 0) {
+      p <- ggplot(trend_data, aes(x = Year)) +
+        geom_line(aes(y = if(input$map_view_type == "total") emissions else per_capita), 
+                  color = "#FF5252", size = 1) +
+        theme_minimal() +
+        labs(
+          y = if(input$map_view_type == "total") "CO2 Emissions (kilotons)" else "CO2 per Capita (metric tons)",
+          title = paste("Historical Trend for", selectedCountry())
+        ) +
+        theme(
+          plot.title = element_text(size = 14, face = "bold"),
+          axis.title = element_text(size = 12),
+          axis.text = element_text(size = 10)
+        )
+      
+      return(p)
+    }
+    
+    ggplot() + theme_void() + 
+      annotate("text", x = 0, y = 0, label = "No historical data available", size = 5)
+  })
+  
+  # Download map data
+  output$download_map_data <- downloadHandler(
+    filename = function() {
+      paste("co2_emissions_map_", input$map_year, ".csv", sep = "")
+    },
+    content = function(file) {
+      data <- co2_map_data() %>% 
+        filter(Year == input$map_year, region %in% input$map_region_filter) %>%
+        select(country, region, emissions, per_capita, Year)
+      
+      write.csv(data, file, row.names = FALSE)
+    }
+  )
+  
+  # ----------------------------
+  # TIMELINE VIEW FUNCTIONALITY
+  # ----------------------------
+  
+  # Timeline year text
+  output$timeline_year_text <- renderText({
+    paste("Global CO₂ Emissions in", input$timeline_year)
+  })
+  
+  # Timeline data
+  timeline_data <- reactive({
+    data <- co2
+    
+    region_totals <- data %>%
+      group_by(Region, Year) %>%
+      summarise(Emissions = sum(`Kilotons of Co2`, na.rm = TRUE) / 1000, .groups = "drop") %>%
+      ungroup()
+    
+    return(region_totals)
+  })
+  
+  # Color palette for regions
+  region_colors <- c(
+    "Africa"   = "#FFC107",
+    "Americas" = "#4CAF50",
+    "Asia"     = "#FF5252",
+    "Europe"   = "#2196F3",
+    "Oceania"  = "#9C27B0"
+  )
+  
+  # Timeline plot
+  output$timeline_plot <- renderPlotly({
+    data <- timeline_data()
+    
+    years <- sort(unique(data$Year))
+    regions <- sort(unique(data$Region))
+    
+    # Build plot
+    p <- plot_ly()
+    
+    # Add area for each region
+    for (region in regions) {
+      region_data <- data[data$Region == region, ] %>% arrange(Year)
+      
+      if (nrow(region_data) > 0) {
+        p <- add_trace(
+          p,
+          x = region_data$Year,
+          y = region_data$Emissions,
+          name = region,
+          type = 'scatter',
+          mode = 'none',
+          stackgroup = 'one',
+          fillcolor = region_colors[region],
+          line = list(color = region_colors[region], width = 0.5),
+          hoverinfo = "text",
+          text = paste(region, ":", round(region_data$Emissions, 1), "million tonnes")
+        )
+      }
+    }
+    
+    # Add vertical line for selected year
+    p <- add_trace(
+      p,
+      x = c(input$timeline_year, input$timeline_year),
+      y = c(0, max(aggregate(Emissions ~ Year, data, sum)$Emissions) * 1.1),
+      type = 'scatter',
+      mode = 'lines',
+      line = list(color = 'black', width = 2, dash = 'dot'),
+      showlegend = FALSE,
+      hoverinfo = "text",
+      text = paste("Selected year:", input$timeline_year)
+    )
+    
+    # Layout
+    p <- layout(
+      p,
+      title = list(text = "Annual CO₂ emissions by world region", font = list(size = 18)),
+      xaxis = list(title = "Year"),
+      yaxis = list(title = "Million tonnes of CO₂"),
+      hovermode = "closest",
+      legend = list(orientation = "h", y = -0.2)
+    )
+    
+    p
+  })
+  
+  # Timeline table
+  output$timeline_table <- renderDT({
+    data <- timeline_data() %>%
+      filter(Year == input$timeline_year) %>%
+      arrange(desc(Emissions))
+    
+    total_emissions <- sum(data$Emissions, na.rm = TRUE)
+    
+    result_table <- data %>%
+      mutate(`Share of Global (%)` = round(Emissions / total_emissions * 100, 1)) %>%
+      select(Region, Emissions, `Share of Global (%)`)
+    
+    datatable(
+      result_table,
+      options = list(
+        pageLength = 10,
+        dom = 'tip',
+        ordering = TRUE
+      ),
+      rownames = FALSE
+    ) %>%
+      formatRound(c("Emissions", "Share of Global (%)"), digits = 1)
+  })
+  
+  # Timeline insights
+  output$timeline_insight <- renderUI({
+    data <- timeline_data() %>% 
+      filter(Year == input$timeline_year) %>%
+      arrange(desc(Emissions))
+    
+    if(nrow(data) > 0) {
+      total_emissions <- sum(data$Emissions, na.rm = TRUE)
+      top_region <- data[1, ]
+      top_share <- top_region$Emissions / total_emissions * 100
+      
+      # Year-over-year change
+      change_text <- ""
+      if(input$timeline_year > min(timeline_data()$Year)) {
+        prev_year <- input$timeline_year - 1
+        prev_data <- timeline_data() %>% 
+          filter(Year == prev_year) %>%
+          summarise(total = sum(Emissions, na.rm = TRUE)) %>%
+          pull(total)
+        
+        if(!is.na(prev_data) && prev_data > 0) {
+          change_pct <- (total_emissions - prev_data) / prev_data * 100
+          change_dir <- ifelse(change_pct >= 0, "increased", "decreased")
+          change_text <- paste0("Global emissions ", change_dir, " by ", 
+                                format(abs(round(change_pct, 1)), nsmall = 1), 
+                                "% compared to ", prev_year, ".")
+        }
+      }
+      
+      HTML(paste0(
+        "<p>In ", input$timeline_year, ", <strong>", top_region$Region, "</strong> was the largest emitter, accounting for ", 
+        format(round(top_share, 1), nsmall = 1), "% of global CO<sub>2</sub> emissions. ",
+        change_text, "</p>",
+        "<p>Total global emissions in ", input$timeline_year, " were <strong>", 
+        format(round(total_emissions, 1), big.mark = ","), " million tonnes</strong>.</p>"
+      ))
+    } else {
+      HTML("<p>No data available for the selected year.</p>")
+    }
+  })
+}
+
+# Run the app
+shinyApp(ui = ui, server = server)
